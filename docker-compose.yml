@@ -1,0 +1,58 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: resilience-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-resilience_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-resilience_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-resilience_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-resilience_user} -d ${POSTGRES_DB:-resilience_db}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks:
+      - resilience-net
+
+  payment-api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: resilience-payment-api
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-resilience_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-resilience_pass}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-resilience_db}
+      ENVIRONMENT: production
+      MOCK_LATENCY_MS: 20
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - resilience-net
+
+volumes:
+  pgdata:
+    driver: local
+
+networks:
+  resilience-net:
+    driver: bridge
