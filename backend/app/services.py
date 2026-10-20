@@ -63,9 +63,12 @@ async def process_payment(
             account_id = account.id
 
     # 4. Simulation de la décision d'autorisation (Mock banking network)
-    # Permet de démontrer les pannes lors des attaques Red Team ou des tests de chaos
-    is_failure = request.simulate_failure or (
-        settings.CHAOS_MODE_ENABLED and random.random() < 0.3
+    # Protection Cyber : simulate_failure n'est accepté que si CHAOS_MODE_ENABLED est activé sur le serveur
+    # afin d'interdire à un client hostile de provoquer arbitrairement des défaillances.
+    chaos_allowed = getattr(settings, "CHAOS_MODE_ENABLED", False)
+    is_failure = bool(
+        (chaos_allowed and request.simulate_failure) or
+        (chaos_allowed and random.random() < 0.3)
     )
 
     now = datetime.utcnow()

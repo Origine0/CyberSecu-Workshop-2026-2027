@@ -48,8 +48,6 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Erreur mot de passe requis depuis .env chiffré SOPS}
       POSTGRES_DB: ${POSTGRES_DB:-resilience_db}
       REMEDIATION_DB_PASSWORD: ${REMEDIATION_DB_PASSWORD:?REMEDIATION_DB_PASSWORD manquant dans .env}
-    ports:
-      - "${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./database/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
@@ -204,49 +202,6 @@ services:
         limits:
           cpus: '1.5'
           memory: 512M
-    networks:
-      - resilience-net
-
-  ai-api:
-    build:
-      context: ./backend-ia
-      dockerfile: Dockerfile
-    container_name: resilience-ai-api
-    restart: unless-stopped
-    environment:
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:1.5b}
-    ports:
-      - "8001:8000"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/ || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
-    volumes:
-      - ./backend-ia/traffic_baseline.csv:/app/traffic_baseline.csv:ro
-    deploy:
-      resources:
-        limits:
-          cpus: '1.5'
-          memory: 1024M
-    networks:
-      - resilience-net
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: resilience-frontend
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
     networks:
       app: { ipv4_address: 10.77.20.30 }
       monitoring: { ipv4_address: 10.77.40.30 }

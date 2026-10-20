@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Depends, Request, Response, status, Query, HTTPException
+from fastapi import FastAPI, Depends, Request, Response, status, Query, HTTPException, Header
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -272,10 +272,34 @@ async def get_waf_status():
     }
 
 
+async def verify_remediation_token(
+    x_remediation_token: Optional[str] = Header(None, alias="X-Remediation-Token"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+):
+    """Contrôle d'accès strict (Cyber-Résilience) : Seul le moteur de remédiation ou un admin autorisé
+    peut modifier dynamiquement la liste de blocage du WAF."""
+    expected_token = getattr(settings, "REMEDIATION_TOKEN", "resilience-remediation-secret")
+    provided_token = x_remediation_token
+    if not provided_token and authorization:
+        if authorization.startswith("Bearer "):
+            provided_token = authorization.split("Bearer ", 1)[1].strip()
+        else:
+            provided_token = authorization.strip()
+
+    if not provided_token or provided_token != expected_token:
+        security_logger.warning("Tentative non autorisée de modification de la liste de blocage WAF")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Accès refusé : Token de remédiation invalide ou absent (en-tête X-Remediation-Token requis)"
+        )
+    return provided_token
+
+
 @app.post(
     "/waf/block",
     summary="Bannir une adresse IP malveillante (Trigger Remédiation)",
-    tags=["WAF & Remediation"]
+    tags=["WAF & Remediation"],
+    dependencies=[Depends(verify_remediation_token)]
 )
 async def block_ip(
     ip: str = Query(..., description="Adresse IP hostile à neutraliser"),
@@ -294,7 +318,8 @@ async def block_ip(
 @app.post(
     "/waf/unblock",
     summary="Réhabiliter une adresse IP",
-    tags=["WAF & Remediation"]
+    tags=["WAF & Remediation"],
+    dependencies=[Depends(verify_remediation_token)]
 )
 async def unblock_ip(
     ip: str = Query(..., description="Adresse IP à réhabiliter")
