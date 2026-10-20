@@ -50,3 +50,5 @@ key.txt
 .env.local
 .env.*.local
 !*.enc.env
+!.env.enc
+!*.enc
