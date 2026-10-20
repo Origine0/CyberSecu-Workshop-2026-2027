@@ -1,7 +1,7 @@
 # Resilience-Alpha - stack complète
 # Réseaux, ports et flux : voir docs/plan-adressage.md
 # Seuls waf (8082) et grafana (3000) sont publiés, tous les réseaux sauf edge sont internes.
-# TODO : mot de passe Postgres de labo en clair, secrets à passer dans Vault avant le rendu.
+# Secrets : fournis par le .env (non versionné), généré depuis secrets.enc.env avec SOPS + age (scripts/decrypt_secrets.sh).
 
 # nom fixé pour garder le même volume pgdata si le dossier change de nom
 name: cybersecu-workshop-2026-2027

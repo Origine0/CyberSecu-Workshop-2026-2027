@@ -107,7 +107,7 @@ Choix de l'équipe : on ne modifie pas le pare-feu Windows du PC Hôte.
   Les ports publiés (8082 et 3000) sont donc joignables depuis tout le Wi-Fi, y compris depuis le PC Attaquant.
 - Ce n'est pas un problème pour le WAF, qui doit être joignable par tous.
 - Pour Grafana, la protection se fait au niveau de l'application : pas d'accès anonyme, pas d'inscription, mot de passe admin
-  défini uniquement dans le `.env` local (non versionné), puis dans Vault.
+  défini uniquement dans le `.env` local (non versionné), chiffré dans le dépôt avec SOPS + age (`secrets.enc.env`).
 - Le reste n'est pas exposé de toute façon : aucun autre service n'a de port publié.
 
 Règle ICMP créée pour autoriser le ping vers le PC Hôte (sans restriction d'adresse) :
@@ -246,7 +246,7 @@ aucun réseau, soit parce que le réseau est `internal`.
 |---|---|---|
 | Un conteneur de `monitoring` compromis (par exemple grafana, publié sur le Wi-Fi) interroge `socket-proxy-ro` et lit la configuration des conteneurs | Le proxy en lecture partage le réseau `monitoring` et n'a pas d'authentification | Proxy en GET uniquement. Prévu : passer les mots de passe en secrets Docker (`/run/secrets/…`) pour qu'ils n'apparaissent plus dans `docker inspect`. Accès à Grafana protégé par compte. |
 | Un conteneur de `monitoring` compromis appelle l'API de remediation | remediation est sur `monitoring` pour recevoir les alertes de ml-detector | API protégée par jeton. Actions limitées à la liste blanche Ansible. Toutes les demandes sont journalisées dans Loki. |
-| Le PC Attaquant atteint la page de connexion de Grafana | Pare-feu Windows non modifié (choix de l'équipe) : la règle de Docker Desktop ouvre les ports publiés | Pas d'accès anonyme, mot de passe hors Git puis dans Vault. Possible ensuite : comptes Viewer pour l'équipe |
+| Le PC Attaquant atteint la page de connexion de Grafana | Pare-feu Windows non modifié (choix de l'équipe) : la règle de Docker Desktop ouvre les ports publiés | Pas d'accès anonyme, mot de passe hors Git (chiffré avec SOPS + age). Possible ensuite : comptes Viewer pour l'équipe |
 
 Une amélioration possible serait d'isoler `socket-proxy-ro` sur un réseau dédié à promtail et cadvisor
 (un 6e réseau). Nous l'avons écartée pour garder l'architecture lisible en 5 zones. Cette limite est documentée dans le dossier.

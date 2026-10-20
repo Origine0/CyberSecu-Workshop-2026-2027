@@ -1,0 +1,6 @@
+# Faux positifs vérifiés à la main (scripts/secret-scan.sh) : valeurs de test, pas des secrets.
+# paymentEngine.test.ts : "idemp_key_unique_123" est une clé d'idempotence de transaction (identifiant), pas une clé d'API.
+efae9ef1b47c698dcb04809b7e75d8d55e9be583:frontend/src/utils/paymentEngine.test.ts:generic-api-key:63
+efae9ef1b47c698dcb04809b7e75d8d55e9be583:frontend/src/utils/paymentEngine.test.ts:generic-api-key:71
+/src/frontend/src/utils/paymentEngine.test.ts:generic-api-key:63
+/src/frontend/src/utils/paymentEngine.test.ts:generic-api-key:71

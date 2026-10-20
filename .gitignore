@@ -44,6 +44,9 @@ yarn-error.log*
 
 # Protection des secrets et clés de chiffrement (SOPS / age)
 key.txt
+keys.txt
+*.agekey
+**/sops/age/
 *.key
 *.pem
 *.env
@@ -52,3 +55,5 @@ key.txt
 !*.enc.env
 !.env.enc
 !*.enc
+# archives de rendu
+Workshop2026-*.zip
