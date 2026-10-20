@@ -1,25 +1,25 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
-  ShieldAlert, 
   Cpu, 
   Send, 
   RefreshCw, 
-  CheckCircle2, 
-  AlertTriangle, 
   Bot, 
-  Sparkles,
-  Zap,
-  Radio,
-  FileText
+  Sparkles
 } from 'lucide-react';
-import { AiAnalyzeResponse, AiAskResponse } from '../types/index.ts';
+import { AiAnalyzeResponse, AiAskResponse, Transaction, WafStatusResponse } from '../types/index.ts';
 
 interface AiCyberSocPanelProps {
   isDegraded?: boolean;
+  transactions?: Transaction[];
+  wafStatus?: WafStatusResponse;
 }
 
-export const AiCyberSocPanel: React.FC<AiCyberSocPanelProps> = ({ isDegraded = false }) => {
-  const [aiEndpoint, setAiEndpoint] = useState<string>('http://localhost:8001');
+export const AiCyberSocPanel: React.FC<AiCyberSocPanelProps> = ({
+  isDegraded = false,
+  transactions = [],
+  wafStatus,
+}) => {
+  const [aiEndpoint] = useState<string>('/ai');
   const [isAiOnline, setIsAiOnline] = useState<boolean | null>(null);
   
   // États Détection ML (/analyze)
@@ -49,57 +49,13 @@ export const AiCyberSocPanel: React.FC<AiCyberSocPanelProps> = ({ isDegraded = f
     advisory_role: "READ_ONLY_NO_REMEDIATION"
   });
 
-  // Test de connectivité à l'API IA
-  const checkAiHealth = async () => {
-    try {
-      const res = await fetch(`${aiEndpoint}/`, { signal: AbortSignal.timeout(2000) });
-      if (res.ok) {
-        setIsAiOnline(true);
-      } else {
-        setIsAiOnline(false);
-      }
-    } catch {
-      setIsAiOnline(false);
-    }
-  };
-
-  useEffect(() => {
-    checkAiHealth();
-  }, [aiEndpoint]);
-
-  // Si l'état dégradé change depuis le dashboard global, adapter les curseurs de simulation
-  useEffect(() => {
-    if (isDegraded) {
-      applyPreset('attack');
-    } else {
-      applyPreset('nominal');
-    }
-  }, [isDegraded]);
-
-  const applyPreset = (type: 'nominal' | 'attack' | 'failure') => {
-    if (type === 'nominal') {
-      setRequestRate(50.0);
-      setErrorRate(0.012);
-      setLatencyMs(118.0);
-    } else if (type === 'attack') {
-      setRequestRate(850.0);
-      setErrorRate(0.48);
-      setLatencyMs(2450.0);
-    } else if (type === 'failure') {
-      setRequestRate(65.0);
-      setErrorRate(0.85);
-      setLatencyMs(650.0);
-    }
-  };
-
-  // Appel POST /analyze
-  const handleAnalyze = async () => {
+  const runAnalyzeRequest = useCallback(async (reqRate: number, errRate: number, latMs: number) => {
     setAnalyzing(true);
     const payload = {
       timestamp: new Date().toISOString(),
-      request_rate: Number(requestRate),
-      error_rate: Number(errorRate),
-      latency_ms: Number(latencyMs)
+      request_rate: Number(reqRate),
+      error_rate: Number(errRate),
+      latency_ms: Number(latMs)
     };
 
     try {
@@ -117,8 +73,7 @@ export const AiCyberSocPanel: React.FC<AiCyberSocPanelProps> = ({ isDegraded = f
         throw new Error('Erreur API');
       }
     } catch {
-      // Inférence locale miroir si conteneur non joignable (garantie zéro panne en soutenance)
-      const isOutlier = requestRate > 150 || errorRate > 0.05 || latencyMs > 300;
+      const isOutlier = reqRate > 150 || errRate > 0.05 || latMs > 300;
       setMlResult({
         timestamp: new Date().toISOString(),
         is_anomaly: isOutlier,
@@ -129,6 +84,71 @@ export const AiCyberSocPanel: React.FC<AiCyberSocPanelProps> = ({ isDegraded = f
     } finally {
       setAnalyzing(false);
     }
+  }, [aiEndpoint]);
+
+  // Test de connectivité à l'API IA
+  const checkAiHealth = useCallback(async () => {
+    try {
+      const res = await fetch(`${aiEndpoint}/`, { signal: AbortSignal.timeout(2000) });
+      setIsAiOnline(res.ok);
+    } catch {
+      setIsAiOnline(false);
+    }
+  }, [aiEndpoint]);
+
+  useEffect(() => {
+    checkAiHealth();
+  }, [checkAiHealth]);
+
+  // Synchronisation automatique avec les métriques temps réel et l'état d'incident
+  useEffect(() => {
+    const recent = transactions.slice(0, 10);
+    const failedCount = recent.filter((t) => t.status === 'FAILED').length;
+    const liveErrorRate = recent.length > 0 ? Number((failedCount / recent.length).toFixed(3)) : 0.012;
+    const liveAvgLatency =
+      recent.length > 0
+        ? Math.max(50, Math.round(recent.reduce((acc, t) => acc + t.latency_ms, 0) / recent.length))
+        : 118;
+    const blockedCount = wafStatus?.stats.total_blocked ?? 0;
+
+    if (isDegraded || liveErrorRate >= 0.2) {
+      const rRate = blockedCount > 0 ? Math.min(950, 250 + blockedCount * 5) : 650.0;
+      const eRate = Math.max(0.35, liveErrorRate);
+      const lMs = Math.max(450, liveAvgLatency);
+      setRequestRate(rRate);
+      setErrorRate(eRate);
+      setLatencyMs(lMs);
+      runAnalyzeRequest(rRate, eRate, lMs);
+    } else {
+      setRequestRate(50.0);
+      setErrorRate(0.012);
+      setLatencyMs(118.0);
+      runAnalyzeRequest(50.0, 0.012, 118.0);
+    }
+  }, [isDegraded, transactions.length, wafStatus?.stats.total_blocked, runAnalyzeRequest]);
+
+  const applyPreset = (type: 'nominal' | 'attack' | 'failure') => {
+    if (type === 'nominal') {
+      setRequestRate(50.0);
+      setErrorRate(0.012);
+      setLatencyMs(118.0);
+      runAnalyzeRequest(50.0, 0.012, 118.0);
+    } else if (type === 'attack') {
+      setRequestRate(850.0);
+      setErrorRate(0.48);
+      setLatencyMs(2450.0);
+      runAnalyzeRequest(850.0, 0.48, 2450.0);
+    } else if (type === 'failure') {
+      setRequestRate(65.0);
+      setErrorRate(0.85);
+      setLatencyMs(650.0);
+      runAnalyzeRequest(65.0, 0.85, 650.0);
+    }
+  };
+
+  // Appel POST /analyze manuel
+  const handleAnalyze = () => {
+    runAnalyzeRequest(requestRate, errorRate, latencyMs);
   };
 
   // Appel POST /ask (RAG)
@@ -171,7 +191,7 @@ export const AiCyberSocPanel: React.FC<AiCyberSocPanelProps> = ({ isDegraded = f
         <div className="flex items-center gap-2">
           <span className={`w-2 h-2 rounded-full ${isAiOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
           <span className="font-medium text-zinc-900">
-            {isAiOnline ? 'Moteur IA connecté (:8001)' : 'Simulation IA (Local)'}
+            {isAiOnline ? 'Moteur IA connecté (/ai)' : 'Simulation IA (Local)'}
           </span>
         </div>
         <div className="flex items-center gap-1.5 font-mono text-[10px] text-zinc-500 bg-zinc-100/80 px-2 py-0.5 rounded-md">
@@ -203,7 +223,7 @@ export const AiCyberSocPanel: React.FC<AiCyberSocPanelProps> = ({ isDegraded = f
           <button
             type="button"
             onClick={() => applyPreset('nominal')}
-            className={`px-2 py-0.5 rounded border transition-colors ${
+            className={`px-2 py-0.5 rounded border transition-colors cursor-pointer ${
               !mlResult?.is_anomaly ? 'bg-white border-zinc-300 font-medium text-zinc-900' : 'bg-transparent border-zinc-200 text-zinc-600'
             }`}
           >
@@ -212,7 +232,7 @@ export const AiCyberSocPanel: React.FC<AiCyberSocPanelProps> = ({ isDegraded = f
           <button
             type="button"
             onClick={() => applyPreset('attack')}
-            className={`px-2 py-0.5 rounded border transition-colors ${
+            className={`px-2 py-0.5 rounded border transition-colors cursor-pointer ${
               mlResult?.is_anomaly ? 'bg-rose-50 border-rose-300 font-bold text-rose-700' : 'bg-transparent border-zinc-200 text-zinc-600'
             }`}
           >
@@ -221,7 +241,7 @@ export const AiCyberSocPanel: React.FC<AiCyberSocPanelProps> = ({ isDegraded = f
           <button
             type="button"
             onClick={() => applyPreset('failure')}
-            className="px-2 py-0.5 rounded border border-zinc-200 text-zinc-600 hover:border-zinc-300 transition-colors"
+            className="px-2 py-0.5 rounded border border-zinc-200 text-zinc-600 hover:border-zinc-300 transition-colors cursor-pointer"
           >
             Défaillance
           </button>
@@ -309,7 +329,7 @@ export const AiCyberSocPanel: React.FC<AiCyberSocPanelProps> = ({ isDegraded = f
               setRagQuery("Procédure d'attaque par déni de service ?");
               handleAsk("Procédure d'attaque par déni de service ?");
             }}
-            className="px-2 py-0.5 rounded bg-white border border-zinc-200 text-zinc-600 hover:text-zinc-900 hover:border-zinc-300 transition-colors"
+            className="px-2 py-0.5 rounded bg-white border border-zinc-200 text-zinc-600 hover:text-zinc-900 hover:border-zinc-300 transition-colors cursor-pointer"
           >
             🛡️ Attaque DDoS
           </button>
@@ -319,7 +339,7 @@ export const AiCyberSocPanel: React.FC<AiCyberSocPanelProps> = ({ isDegraded = f
               setRagQuery("Procédure de défaillance base de données ?");
               handleAsk("Procédure de défaillance base de données ?");
             }}
-            className="px-2 py-0.5 rounded bg-white border border-zinc-200 text-zinc-600 hover:text-zinc-900 hover:border-zinc-300 transition-colors"
+            className="px-2 py-0.5 rounded bg-white border border-zinc-200 text-zinc-600 hover:text-zinc-900 hover:border-zinc-300 transition-colors cursor-pointer"
           >
             🗄️ Panne Base
           </button>
@@ -329,7 +349,7 @@ export const AiCyberSocPanel: React.FC<AiCyberSocPanelProps> = ({ isDegraded = f
               setRagQuery("Quelle est la procédure d'audit post-incident ?");
               handleAsk("Quelle est la procédure d'audit post-incident ?");
             }}
-            className="px-2 py-0.5 rounded bg-white border border-zinc-200 text-zinc-600 hover:text-zinc-900 hover:border-zinc-300 transition-colors"
+            className="px-2 py-0.5 rounded bg-white border border-zinc-200 text-zinc-600 hover:text-zinc-900 hover:border-zinc-300 transition-colors cursor-pointer"
           >
             📋 Audit Post-Incident
           </button>

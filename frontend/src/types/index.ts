@@ -51,6 +51,16 @@ export interface HealthCheckResponse {
   };
 }
 
+export interface WafStatusResponse {
+  banned_ips: string[];
+  stats: {
+    rate_limit_drops: number;
+    banned_ip_drops: number;
+    fuzzing_drops: number;
+    total_blocked: number;
+  };
+}
+
 export interface HourlyVolumeCTE {
   hour_bucket: string;
   tx_count: number;

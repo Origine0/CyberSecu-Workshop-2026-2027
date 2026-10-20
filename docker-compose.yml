@@ -87,6 +87,9 @@ services:
       # jeton exigé par /waf/block et /waf/unblock (sinon la valeur par défaut du code, publique, s'applique)
       REMEDIATION_TOKEN: ${REMEDIATION_TOKEN:?REMEDIATION_TOKEN manquant dans .env}
       CHAOS_MODE_ENABLED: ${CHAOS_MODE_ENABLED:-false}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET manquant dans .env}
+      # false : les paiements anonymes (traffic-gen, carte directe) restent acceptés
+      REQUIRE_AUTH: ${REQUIRE_AUTH:-false}
     depends_on:
       postgres:
         condition: service_healthy
@@ -100,16 +103,52 @@ services:
       app: { ipv4_address: 10.77.20.12 }
       data: { ipv4_address: 10.77.30.12 }
 
+  # service d'authentification et de comptes (JWT, solde) - joint par le waf sur /auth/
   auth:
-    <<: *placeholder
+    <<: *defaults
+    build:
+      context: ./backend-auth
+      dockerfile: Dockerfile
+    image: resilience/auth:1.0.0
     container_name: resilience-auth
+    read_only: true
+    cap_drop: [ALL]
+    tmpfs:
+      - /tmp
     environment:
-      <<: *placeholder-env
-      SERVICE_NAME: auth
-      OWNER: équipe Dev
-      PORT: "8001"
+      POSTGRES_USER: ${POSTGRES_USER:-resilience_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Erreur mot de passe requis depuis .env chiffré SOPS}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:-resilience_db}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET manquant dans .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8001/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
     networks:
       app: { ipv4_address: 10.77.20.13 }
+      data: { ipv4_address: 10.77.30.13 }
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: resilience-frontend
+    restart: unless-stopped
+    environment:
+      # cibles des proxys Vite (/api, /auth, /ai) : toujours via le WAF
+      VITE_PROXY_TARGET: http://waf:8080
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      app: { ipv4_address: 10.77.20.11 }
 
   # --- point d'entrée ---
   # waf : reverse proxy nginx avec la liste blanche des routes (à remplacer par le WAF définitif)
@@ -230,27 +269,8 @@ services:
           cpus: '1.5'
           memory: 1024M
     networks:
-      edge: { ipv4_address: 10.77.10.41 }
-
-  # frontend : accessible uniquement à travers le waf (http://localhost:8082/)
-  frontend:
-    <<: *defaults
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    image: resilience/frontend:1.0
-    container_name: resilience-frontend
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-    networks:
-      app: { ipv4_address: 10.77.20.11 }
+      edge: { ipv4_address: 10.77.10.40 }
+      app: { ipv4_address: 10.77.20.40 }
 
   grafana:
     <<: *defaults

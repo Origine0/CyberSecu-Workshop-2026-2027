@@ -2,6 +2,8 @@ import time
 import uuid
 import random
 from datetime import datetime
+from decimal import Decimal, ROUND_HALF_UP
+from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from fastapi import HTTPException, status
@@ -17,7 +19,8 @@ async def process_payment(
     db: AsyncSession,
     request: PaymentRequest,
     client_ip: str = "127.0.0.1",
-    user_agent: str = "MockPaymentClient/1.0"
+    user_agent: str = "MockPaymentClient/1.0",
+    claims: Optional[dict] = None
 ) -> PaymentResponse:
     start_time = time.perf_counter()
     
@@ -54,9 +57,22 @@ async def process_payment(
                 detail=f"Marchand '{request.merchant_code}' introuvable et aucun marchand de repli actif."
             )
 
-    # 3. Compte émetteur optionnel
+    # 3. Compte émetteur : celui du jeton JWT (débit réel) sinon compte optionnel (anonyme, sans débit)
     account_id = None
-    if request.account_number:
+    auth_account = None
+    amount_dec = Decimal(str(request.amount)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    if claims:
+        try:
+            acct_uuid = uuid.UUID(str(claims.get('acct')))
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Jeton invalide')
+        # verrou de ligne : évite deux débits concurrents sur le même solde
+        stmt_acc = select(Account).where(Account.id == acct_uuid).with_for_update()
+        auth_account = (await db.execute(stmt_acc)).scalar_one_or_none()
+        if not auth_account or auth_account.status != 'ACTIVE':
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Compte inexistant ou non actif')
+        account_id = auth_account.id
+    elif request.account_number:
         stmt_acc = select(Account).where(Account.account_number == request.account_number)
         account = (await db.execute(stmt_acc)).scalar_one_or_none()
         if account:
@@ -74,7 +90,14 @@ async def process_payment(
     now = datetime.utcnow()
     tx_ref = f"TX-{now.strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6].upper()}"
     
-    if is_failure:
+    insufficient = auth_account is not None and not is_failure and auth_account.balance < amount_dec
+
+    if insufficient:
+        tx_status = "FAILED"
+        err_code = "INSUFFICIENT_FUNDS"
+        err_msg = "Solde insuffisant."
+        auth_code = None
+    elif is_failure:
         tx_status = "FAILED"
         err_code = "ERR_GATEWAY_TIMEOUT"
         err_msg = "Échec d'autorisation simulateur bancaire / incident réseau injecté."
@@ -84,6 +107,8 @@ async def process_payment(
         err_code = None
         err_msg = None
         auth_code = f"AUTH-{uuid.uuid4().hex[:8].upper()}"
+        if auth_account is not None:
+            auth_account.balance = auth_account.balance - amount_dec
 
     elapsed_ms = int((time.perf_counter() - start_time) * 1000) + settings.MOCK_LATENCY_MS
 
@@ -92,7 +117,7 @@ async def process_payment(
         reference=tx_ref,
         merchant_id=merchant.id,
         account_id=account_id,
-        amount=request.amount,
+        amount=amount_dec,
         currency=request.currency.upper(),
         status=tx_status,
         error_code=err_code,
@@ -134,5 +159,6 @@ async def process_payment(
         created_at=new_tx.created_at,
         latency_ms=elapsed_ms,
         error_code=err_code,
-        message="Paiement traité avec succès" if tx_status == "SUCCESS" else "Transaction rejetée"
+        message=("Solde insuffisant" if insufficient else "Paiement traité avec succès" if tx_status == "SUCCESS" else "Transaction rejetée"),
+        balance_after=float(auth_account.balance) if auth_account is not None else None
     )
