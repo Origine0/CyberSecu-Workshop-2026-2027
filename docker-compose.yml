@@ -136,17 +136,24 @@ services:
       data: { ipv4_address: 10.77.30.13 }
 
   frontend:
+    <<: *defaults
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    image: resilience/frontend:1.0
     container_name: resilience-frontend
-    restart: unless-stopped
     environment:
       # cibles des proxys Vite (/api, /auth, /ai) : toujours via le WAF
       VITE_PROXY_TARGET: http://waf:8080
     volumes:
       - ./frontend:/app
       - /app/node_modules
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     networks:
       app: { ipv4_address: 10.77.20.11 }
 
@@ -268,9 +275,9 @@ services:
         limits:
           cpus: '1.5'
           memory: 1024M
+    # edge uniquement : le waf le joint par ce réseau pour /ai/ ; sur app, le RAG pourrait joindre la remédiation
     networks:
-      edge: { ipv4_address: 10.77.10.40 }
-      app: { ipv4_address: 10.77.20.40 }
+      edge: { ipv4_address: 10.77.10.41 }
 
   grafana:
     <<: *defaults
@@ -433,31 +440,55 @@ services:
       monitoring: { ipv4_address: 10.77.40.60 }
 
   # --- détection / remédiation ---
+  # détection continue : mesure le trafic toutes les 5 s, le fait juger par le modèle Isolation Forest
+  # entraîné dans backend-ia, et prévient le moteur de remédiation en cas d'anomalie (aucune action directe)
   ml-detector:
-    <<: *placeholder
+    <<: *defaults
+    build: ./infra/ml-detector
+    image: resilience/ml-detector:1.0
     container_name: resilience-ml-detector
+    user: "65534:65534"
+    read_only: true
+    cap_drop: [ALL]
+    tmpfs:
+      - /tmp
     environment:
-      <<: *placeholder-env
-      SERVICE_NAME: ml-detector
-      OWNER: équipe IA
-      PORT: "8010"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      MODEL_FILE: /model/isolation_forest_model.joblib
+      REMEDIATION_TOKEN: ${REMEDIATION_TOKEN:?REMEDIATION_TOKEN manquant dans .env}
+    volumes:
+      - ./infra/ml-detector:/app:ro
+      - ./backend-ia:/model:ro
+    command: ["python", "/app/detector.py"]
+    depends_on:
+      loki:
+        condition: service_healthy
+      docker-stats-exporter:
+        condition: service_healthy
+    healthcheck:
+      # healthy si la boucle de détection tourne (heartbeat de moins de 30 s)
+      test: ["CMD-SHELL", "test $$(( $$(date +%s) - $$(stat -c %Y /tmp/ml-detector.heartbeat) )) -lt 30"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
     networks:
       monitoring: { ipv4_address: 10.77.40.40 }
 
-  # moteur de remédiation : pour l'instant le placeholder, mais déjà avec Ansible et tout son environnement.
-  # le vrai moteur remplacera la commande (image construite à partir de resilience/ansible-runner).
+  # moteur de remédiation : reçoit les alertes du détecteur et lance les playbooks de la liste blanche
   remediation:
     <<: *placeholder
     build: ./infra/ansible-runner
     image: resilience/ansible-runner:1.0
     container_name: resilience-remediation
+    command: ["python", "/app/engine.py"]
     tmpfs:
       - /tmp
     environment:
       <<: *placeholder-env
-      SERVICE_NAME: remediation
-      OWNER: équipe Dev
       PORT: "8020"
+      COOLDOWN_S: "90"
       DOCKER_API_URL: http://socket-proxy-remed:2375
       WAF_URL: http://waf:8080
       WAF_BLOCKLIST_DIR: /blocklist
@@ -468,7 +499,7 @@ services:
       REMEDIATION_TOKEN: ${REMEDIATION_TOKEN:?REMEDIATION_TOKEN manquant dans .env}
       PGPASSWORD: ${REMEDIATION_DB_PASSWORD:?REMEDIATION_DB_PASSWORD manquant dans .env}
     volumes:
-      - ./infra/placeholders:/app:ro
+      - ./infra/remediation-engine:/app:ro
       - ./ansible:/ansible:ro
       - waf-blocklist:/blocklist
     networks:

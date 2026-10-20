@@ -12,9 +12,516 @@
     "to": "now"
   },
   "schemaVersion": 39,
-  "version": 2,
+  "version": 3,
   "editable": true,
   "panels": [
+    {
+      "type": "row",
+      "title": "Détection et remédiation automatiques",
+      "collapsed": false,
+      "panels": [],
+      "id": 17,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Détection ML (Isolation Forest)",
+      "description": "Verdict du modèle sur les 30 dernières secondes de trafic",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "ml_anomaly",
+          "legendFormat": "",
+          "instant": true,
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Normal",
+                  "color": "green",
+                  "index": 0
+                },
+                "1": {
+                  "text": "ANOMALIE",
+                  "color": "red",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "id": 18,
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Alertes du ML (1 h)",
+      "description": "Alertes envoyées au moteur (les doublons sont ignorés par le moteur)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "round(sum(increase(ml_alerts_sent_total[1h])))",
+          "legendFormat": "",
+          "instant": true,
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [],
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "id": 19,
+      "gridPos": {
+        "x": 6,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Actions réussies (1 h)",
+      "description": "Playbooks Ansible lancés par le moteur et terminés avec un paiement de test SUCCESS",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "round(sum(increase(remediation_actions_total{result=\"success\"}[1h]))) or vector(0)",
+          "legendFormat": "",
+          "instant": true,
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [],
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "id": 20,
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Actions en échec (1 h)",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "round(sum(increase(remediation_actions_total{result=\"failure\"}[1h]))) or vector(0)",
+          "legendFormat": "",
+          "instant": true,
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [],
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "id": 21,
+      "gridPos": {
+        "x": 18,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      }
+    },
+    {
+      "id": 22,
+      "type": "state-timeline",
+      "title": "Chaîne automatique : anomalie détectée et service en panne",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Rouge en haut = le modèle voit une anomalie ; rouge en bas = un service est arrêté. Les deux repassent au vert sans intervention.",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(ml_anomaly)",
+          "legendFormat": "Anomalie détectée (ML)"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "1 - min(docker_container_healthy{service=~\"payment-api|waf|auth|frontend\"})",
+          "legendFormat": "Service en panne"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "OK",
+                  "color": "green",
+                  "index": 0
+                },
+                "1": {
+                  "text": "KO",
+                  "color": "red",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showValue": "never",
+        "rowHeight": 0.8,
+        "mergeValues": true,
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 24,
+        "h": 5
+      }
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "Score d'anomalie du modèle (sous 0 = anomalie)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "ml_anomaly_score",
+          "legendFormat": "score"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "thresholdsStyle": {
+              "mode": "line+area"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 10,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "Mesures analysées par le modèle",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "request_rate (req/s), error_rate (0 à 1), latency_ms (ms) : les trois entrées du modèle",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "ml_feature",
+          "legendFormat": "{{name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "latency_ms"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "ms"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 10,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "id": 25,
+      "type": "logs",
+      "title": "Journal de la remédiation (alerte → décision → playbook → résultat)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{service=~\"ml-detector|remediation\"} | json | step=~\"alert_sent|accepted|start|end|skipped|refused\" | line_format \"{{.event}} | {{.step}} | {{.type}} {{.action}} | {{.result}} {{.reason}}\""
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "enableLogDetails": true
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 18,
+        "w": 24,
+        "h": 9
+      }
+    },
     {
       "type": "stat",
       "title": "Transactions réussies (5 min)",
@@ -65,7 +572,7 @@
       "id": 1,
       "gridPos": {
         "x": 0,
-        "y": 0,
+        "y": 27,
         "w": 6,
         "h": 4
       }
@@ -124,7 +631,7 @@
       "id": 2,
       "gridPos": {
         "x": 6,
-        "y": 0,
+        "y": 27,
         "w": 6,
         "h": 4
       }
@@ -187,7 +694,7 @@
       "id": 3,
       "gridPos": {
         "x": 12,
-        "y": 0,
+        "y": 27,
         "w": 6,
         "h": 4
       }
@@ -249,7 +756,7 @@
       "id": 4,
       "gridPos": {
         "x": 18,
-        "y": 0,
+        "y": 27,
         "w": 6,
         "h": 4
       }
@@ -298,7 +805,7 @@
       "id": 5,
       "gridPos": {
         "x": 0,
-        "y": 4,
+        "y": 31,
         "w": 12,
         "h": 8
       }
@@ -357,7 +864,7 @@
       "id": 6,
       "gridPos": {
         "x": 12,
-        "y": 4,
+        "y": 31,
         "w": 12,
         "h": 8
       }
@@ -407,7 +914,7 @@
       "id": 7,
       "gridPos": {
         "x": 0,
-        "y": 12,
+        "y": 39,
         "w": 12,
         "h": 8
       }
@@ -457,7 +964,7 @@
       "id": 8,
       "gridPos": {
         "x": 12,
-        "y": 12,
+        "y": 39,
         "w": 12,
         "h": 8
       }
@@ -507,7 +1014,7 @@
       "id": 9,
       "gridPos": {
         "x": 16,
-        "y": 36,
+        "y": 63,
         "w": 8,
         "h": 8
       }
@@ -538,7 +1045,7 @@
       "id": 11,
       "gridPos": {
         "x": 0,
-        "y": 44,
+        "y": 71,
         "w": 24,
         "h": 10
       }
@@ -590,7 +1097,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 20,
+        "y": 47,
         "w": 12,
         "h": 8
       }
@@ -642,7 +1149,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 20,
+        "y": 47,
         "w": 12,
         "h": 8
       }
@@ -714,7 +1221,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 28,
+        "y": 55,
         "w": 24,
         "h": 8
       }
@@ -772,7 +1279,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 36,
+        "y": 63,
         "w": 16,
         "h": 8
       }

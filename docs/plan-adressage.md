@@ -154,7 +154,7 @@ On utilise la plage `10.77.0.0/16` pour éviter deux conflits :
 |---|---|---|---|---|
 | `edge` | `10.77.10.0/24` | non | waf, grafana, ai-api | Seul réseau relié à l'extérieur, nécessaire pour publier un port |
 | `app` | `10.77.20.0/24` | oui | waf, frontend, payment-api, auth, prometheus, traffic-gen, remediation | Trafic applicatif derrière le WAF |
-| `data` | `10.77.30.0/24` | oui | payment-api, postgres, remediation | L'API écrit, la remédiation lit (compte `remediation_ro`) |
+| `data` | `10.77.30.0/24` | oui | payment-api, auth, postgres, remediation  | L'API écrit, la remédiation lit (compte `remediation_ro`) |
 | `monitoring` | `10.77.40.0/24` | oui | prometheus, grafana, loki, promtail, cadvisor, docker-stats-exporter, ml-detector, socket-proxy-ro, remediation | Collecte et lecture des métriques et des logs ; ml-detector y prévient remediation |
 | `remediation` | `10.77.50.0/24` | oui | remediation, socket-proxy-remed | Seul le moteur de remédiation joint le proxy qui redémarre les conteneurs |
 
@@ -179,7 +179,7 @@ immédiatement dans les logs. Le `.1` de chaque sous-réseau est réservé à la
 | ai-api | `.41` | 10.77.10.41 |
 | traffic-gen | `.14` | 10.77.20.14 |
 | payment-api | `.12` | 10.77.20.12, 10.77.30.12 |
-| auth | `.13` | 10.77.20.13 |
+| auth | `.13` | 10.77.20.13, 10.77.30.13 |
 | postgres | `.20` | 10.77.30.20 |
 | prometheus | `.30` | 10.77.20.30, 10.77.40.30 |
 | grafana | `.31` | 10.77.10.31, 10.77.40.31 |
@@ -217,13 +217,15 @@ aucun réseau, soit parce que le réseau est `internal`.
 | F10 | promtail | socket-proxy-ro | 2375 | Découverte des conteneurs et lecture des logs (GET seulement) |
 | F11 | cadvisor, docker-stats-exporter | socket-proxy-ro | 2375 | Métadonnées et statistiques des conteneurs (GET seulement) |
 | F12 | promtail | loki | 3100 | Envoi des logs |
-| F13 | ml-detector | prometheus, loki | 9090, 3100 | Lecture des signaux pour la détection |
-| F14 | ml-detector | remediation | 8020 | Déclenchement d'une action via `monitoring`, avec jeton, sur un service en liste blanche |
+| F13 | ml-detector | loki, docker-stats-exporter | 3100, 9105 | Mesures de la détection (logs du waf et du trafic, état des conteneurs) |
+| F14 | ml-detector | remediation | 8020 | `POST /alerts` avec jeton, quand le modèle Isolation Forest confirme une anomalie |
 | F15 | remediation | socket-proxy-remed | 2375 | Lecture (conteneurs, réseaux, volumes) et `POST /containers/{id}/restart` uniquement, depuis le seul conteneur `remediation` |
 | F16 | traffic-gen | waf | 8080 | Trafic normal : un `POST /api/pay` toutes les 2 s, par le même chemin qu'un vrai client |
 | F17 | remediation | waf | 8080 | Paiement de test après une action de remédiation, par le chemin d'un vrai client |
 | F18 | remediation | postgres | 5432 | Contrôle d'intégrité et preuve de reprise, compte `remediation_ro` en lecture seule (deux tables) |
 | F19 | ai-api | Ollama (PC Hôte ou PC IA `.60`) | 11434 | Assistant RAG : seul service à sortir vers Ollama, par le réseau `edge` |
+| F20 | waf | ai-api | 8000 | Route `/ai/` de l'assistant, par le réseau `edge` |
+| F21 | auth | postgres | 5432 | Comptes et soldes du service d'authentification |
 
 ### Flux interdits
 
