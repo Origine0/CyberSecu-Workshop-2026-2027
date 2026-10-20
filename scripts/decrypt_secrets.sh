@@ -19,13 +19,18 @@ if ! command -v sops &> /dev/null; then
     exit 1
 fi
 
-if [ ! -f "${SECRETS_ENC}" ]; then
-    echo "❌ Erreur: Fichier de configuration chiffré introuvable (.env.enc)"
+if [ -f "${ROOT_DIR}/secrets.enc.env" ]; then
+    SECRETS_ENC="${ROOT_DIR}/secrets.enc.env"
+    echo "🔓 [SOPS] Déchiffrement direct de ${SECRETS_ENC} vers .env..."
+    sops -d "${SECRETS_ENC}" > "${ENV_TARGET}"
+elif [ -f "${ROOT_DIR}/.env.enc" ]; then
+    SECRETS_ENC="${ROOT_DIR}/.env.enc"
+    echo "🔓 [SOPS] Déchiffrement direct de ${SECRETS_ENC} vers .env..."
+    sops --input-type dotenv -d "${SECRETS_ENC}" > "${ENV_TARGET}"
+else
+    echo "❌ Erreur: Fichier de configuration chiffré introuvable (secrets.enc.env ou .env.enc)"
     exit 1
 fi
-
-echo "🔓 [SOPS] Déchiffrement direct de ${SECRETS_ENC} vers .env..."
-sops -d "${SECRETS_ENC}" > "${ENV_TARGET}"
 
 echo "✅ [SOPS] Fichier .env généré avec succès à partir des secrets chiffrés (fichier ignoré par git)."
 echo "🛡️  Vérification de sécurité : .env ne doit JAMAIS être commité."
