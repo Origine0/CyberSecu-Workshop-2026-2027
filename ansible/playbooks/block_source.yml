@@ -1,0 +1,11 @@
+# Confinement : ajoute (ou retire) une règle de blocage dans le WAF, sans le redémarrer.
+#   ansible-playbook /ansible/playbooks/block_source.yml -e block_type=user_agent -e value=sqlmap
+#   block_type : ip | user_agent | ratelimit ; retirer : -e state=absent
+- name: Bloquer une source dans le WAF
+  hosts: localhost
+  gather_facts: false
+  vars:
+    state: present
+  roles:
+    - waf_blocklist
+    - payment_check

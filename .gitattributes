@@ -1,0 +1,11 @@
+# Fichiers lus par bash, make, Python, nginx, Postgres ou Docker : toujours en fins de ligne Linux,
+# même si le dépôt est cloné sous Windows (sinon erreurs du type « \r: command not found »).
+*.sh          text eol=lf
+Makefile      text eol=lf
+Dockerfile    text eol=lf
+*.py          text eol=lf
+*.yml         text eol=lf
+*.yaml        text eol=lf
+*.conf        text eol=lf
+*.sql         text eol=lf
+*.json        text eol=lf

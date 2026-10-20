@@ -1,0 +1,9 @@
+# Redémarre un service de la liste blanche puis vérifie que la plateforme fonctionne.
+#   sur l'hôte   : make restart SERVICE=payment-api
+#   dans remediation : ansible-playbook /ansible/playbooks/restart_service.yml -e service=payment-api
+- name: Redémarrer un service et vérifier la reprise
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - service_restart
+    - payment_check

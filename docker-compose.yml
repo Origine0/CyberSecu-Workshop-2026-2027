@@ -1,58 +1,472 @@
+# Resilience-Alpha - stack complète
+# Réseaux, ports et flux : voir docs/plan-adressage.md
+# Seuls waf (8082) et grafana (3000) sont publiés, tous les réseaux sauf edge sont internes.
+# TODO : mot de passe Postgres de labo en clair, secrets à passer dans Vault avant le rendu.
+
+# nom fixé pour garder le même volume pgdata si le dossier change de nom
+name: cybersecu-workshop-2026-2027
+
+x-defaults: &defaults
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+# conteneur temporaire pour les services pas encore livrés (répond juste /health et /metrics)
+x-placeholder: &placeholder
+  <<: *defaults
+  image: python:3.12.11-alpine3.22
+  user: "65534:65534"
+  read_only: true
+  cap_drop: [ALL]
+  environment: &placeholder-env
+    PYTHONDONTWRITEBYTECODE: "1"
+    PYTHONUNBUFFERED: "1"
+  volumes:
+    - ./infra/placeholders/placeholder.py:/app/placeholder.py:ro
+  command: ["python", "/app/placeholder.py"]
+  healthcheck:
+    # wget plutôt que python, beaucoup moins coûteux en CPU
+    test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:$${PORT}/health || exit 1"]
+    interval: 10s
+    timeout: 3s
+    retries: 3
+    start_period: 5s
+
 services:
+  # --- données ---
   postgres:
-    image: postgres:16-alpine
+    <<: *defaults
+    image: postgres:16.10-alpine
     container_name: resilience-postgres
-    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-resilience_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-resilience_pass}
       POSTGRES_DB: ${POSTGRES_DB:-resilience_db}
-    ports:
-      - "5432:5432"
+      REMEDIATION_DB_PASSWORD: ${REMEDIATION_DB_PASSWORD:?REMEDIATION_DB_PASSWORD manquant dans .env}
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./database/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./infra/postgres/02-remediation-role.sh:/docker-entrypoint-initdb.d/02-remediation-role.sh:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-resilience_user} -d ${POSTGRES_DB:-resilience_db}"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
       timeout: 3s
       retries: 5
-      start_period: 5s
+      start_period: 10s
     networks:
-      - resilience-net
+      data: { ipv4_address: 10.77.30.20 }
 
+  # --- application ---
   payment-api:
+    <<: *defaults
     build:
       context: ./backend
       dockerfile: Dockerfile
+    image: resilience/payment-api:1.0.0
     container_name: resilience-payment-api
-    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-resilience_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-resilience_pass}
       POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
+      POSTGRES_PORT: "5432"
       POSTGRES_DB: ${POSTGRES_DB:-resilience_db}
       ENVIRONMENT: production
-      MOCK_LATENCY_MS: 20
-    ports:
-      - "8000:8000"
+      MOCK_LATENCY_MS: ${MOCK_LATENCY_MS:-20}
+      CHAOS_MODE_ENABLED: ${CHAOS_MODE_ENABLED:-false}
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+    networks:
+      app: { ipv4_address: 10.77.20.12 }
+      data: { ipv4_address: 10.77.30.12 }
+
+  auth:
+    <<: *placeholder
+    container_name: resilience-auth
+    environment:
+      <<: *placeholder-env
+      SERVICE_NAME: auth
+      OWNER: Antoine
+      PORT: "8001"
+    networks:
+      app: { ipv4_address: 10.77.20.13 }
+
+  frontend:
+    <<: *placeholder
+    container_name: resilience-frontend
+    environment:
+      <<: *placeholder-env
+      SERVICE_NAME: frontend
+      OWNER: Antoine
+      PORT: "3000"
+    networks:
+      app: { ipv4_address: 10.77.20.11 }
+
+  # --- point d'entrée ---
+  # waf temporaire : simple reverse proxy nginx, sans règles. Remplacé par le WAF de Clara.
+  waf:
+    <<: *defaults
+    image: nginxinc/nginx-unprivileged:1.28.0-alpine
+    container_name: resilience-waf
+    read_only: true
+    cap_drop: [ALL]
+    tmpfs:
+      - /tmp
+    volumes:
+      - ./infra/placeholders/waf/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - waf-blocklist:/etc/nginx/blocklist:ro
+    ports:
+      # 8082 car 8080 (Oracle) et 8081 (Apache) sont déjà pris sur le PC hôte
+      - "${PUBLISH_IP:-0.0.0.0}:${WAF_PORT:-8082}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks:
+      edge: { ipv4_address: 10.77.10.10 }
+      app: { ipv4_address: 10.77.20.10 }
+
+  # génère du trafic normal : un paiement toutes les 2 s, en passant par le waf
+  traffic-gen:
+    <<: *defaults
+    image: python:3.12.11-alpine3.22
+    container_name: resilience-traffic-gen
+    user: "65534:65534"
+    read_only: true
+    cap_drop: [ALL]
+    tmpfs:
+      - /tmp
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      TARGET_URL: http://waf:8080/api/pay
+      INTERVAL_S: ${TRAFFIC_INTERVAL_S:-2}
+    volumes:
+      - ./infra/traffic-gen/traffic_gen.py:/app/traffic_gen.py:ro
+    command: ["python", "/app/traffic_gen.py"]
+    depends_on:
+      waf:
+        condition: service_healthy
+      payment-api:
+        condition: service_healthy
+    healthcheck:
+      # healthy si la boucle tourne encore (heartbeat de moins de 30 s)
+      test: ["CMD-SHELL", "test $$(( $$(date +%s) - $$(stat -c %Y /tmp/traffic-gen.heartbeat) )) -lt 30"]
       interval: 10s
       timeout: 3s
       retries: 3
       start_period: 10s
     networks:
-      - resilience-net
+      app: { ipv4_address: 10.77.20.14 }
+
+  # --- supervision ---
+  prometheus:
+    <<: *defaults
+    image: prom/prometheus:v3.5.0
+    container_name: resilience-prometheus
+    read_only: true
+    cap_drop: [ALL]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=3d
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9090/-/healthy || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      app: { ipv4_address: 10.77.20.30 }
+      monitoring: { ipv4_address: 10.77.40.30 }
+
+  grafana:
+    <<: *defaults
+    image: grafana/grafana:12.1.1
+    container_name: resilience-grafana
+    cap_drop: [ALL]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      # pas de valeur par défaut : Grafana est visible depuis tout le Wi-Fi
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD manquant dans .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+      # pas d'internet pendant la démo
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_LOG_LEVEL: warn
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "${PUBLISH_IP:-0.0.0.0}:3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    networks:
+      edge: { ipv4_address: 10.77.10.31 }
+      monitoring: { ipv4_address: 10.77.40.31 }
+
+  loki:
+    <<: *defaults
+    image: grafana/loki:3.5.3
+    container_name: resilience-loki
+    read_only: true
+    cap_drop: [ALL]
+    command: ["-config.file=/etc/loki/loki-config.yml"]
+    volumes:
+      - ./infra/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki-data:/loki
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3100/ready || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+    networks:
+      monitoring: { ipv4_address: 10.77.40.32 }
+
+  promtail:
+    <<: *defaults
+    image: grafana/promtail:3.5.3
+    container_name: resilience-promtail
+    read_only: true
+    cap_drop: [ALL]
+    command: ["-config.file=/etc/promtail/promtail-config.yml"]
+    volumes:
+      - ./infra/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - promtail-positions:/var/lib/promtail
+    depends_on:
+      loki:
+        condition: service_healthy
+      socket-proxy-ro:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/9080 && printf \"GET /ready HTTP/1.0\\r\\n\\r\\n\" >&3 && grep -q \"200 OK\" <&3' || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      monitoring: { ipv4_address: 10.77.40.33 }
+
+  cadvisor:
+    <<: *defaults
+    image: gcr.io/cadvisor/cadvisor:v0.52.1
+    container_name: resilience-cadvisor
+    command:
+      - --docker=tcp://socket-proxy-ro:2375
+      - --docker_only=true
+      - --housekeeping_interval=30s
+      - --store_container_labels=false
+      - --disable_metrics=percpu,sched,tcp,udp,hugetlb,referenced_memory,cpu_topology,resctrl,process
+    volumes:
+      - /sys:/sys:ro
+    depends_on:
+      socket-proxy-ro:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+    networks:
+      monitoring: { ipv4_address: 10.77.40.34 }
+
+  # métriques par conteneur (cadvisor ne les remonte pas sous Docker Desktop)
+  docker-stats-exporter:
+    <<: *defaults
+    image: python:3.12.11-alpine3.22
+    container_name: resilience-docker-stats-exporter
+    user: "65534:65534"
+    read_only: true
+    cap_drop: [ALL]
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      DOCKER_PROXY_HOST: socket-proxy-ro
+      DOCKER_PROXY_PORT: "2375"
+      COMPOSE_PROJECT: cybersecu-workshop-2026-2027
+      PORT: "9105"
+    volumes:
+      - ./infra/docker-stats-exporter/exporter.py:/app/exporter.py:ro
+    command: ["python", "/app/exporter.py"]
+    depends_on:
+      socket-proxy-ro:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9105/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      monitoring: { ipv4_address: 10.77.40.35 }
+
+  # accès Docker en lecture seule (promtail, cadvisor, docker-stats-exporter)
+  socket-proxy-ro:
+    <<: *defaults
+    image: tecnativa/docker-socket-proxy:v0.4.1
+    container_name: resilience-socket-proxy-ro
+    read_only: true
+    tmpfs:
+      - /run
+      - /tmp
+    environment:
+      CONTAINERS: "1"
+      INFO: "1"
+      EVENTS: "1"
+      NETWORKS: "1"
+      POST: "0"
+      DISABLE_IPV6: "1"
+      LOG_LEVEL: warning
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:2375/_ping || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks:
+      monitoring: { ipv4_address: 10.77.40.60 }
+
+  # --- détection / remédiation ---
+  ml-detector:
+    <<: *placeholder
+    container_name: resilience-ml-detector
+    environment:
+      <<: *placeholder-env
+      SERVICE_NAME: ml-detector
+      OWNER: Agathe
+      PORT: "8010"
+    networks:
+      monitoring: { ipv4_address: 10.77.40.40 }
+
+  # moteur de remédiation : pour l'instant le placeholder, mais déjà avec Ansible et tout son environnement.
+  # Antoine remplace la commande par son moteur (image construite à partir de resilience/ansible-runner).
+  remediation:
+    <<: *placeholder
+    build: ./infra/ansible-runner
+    image: resilience/ansible-runner:1.0
+    container_name: resilience-remediation
+    tmpfs:
+      - /tmp
+    environment:
+      <<: *placeholder-env
+      SERVICE_NAME: remediation
+      OWNER: Antoine
+      PORT: "8020"
+      DOCKER_API_URL: http://socket-proxy-remed:2375
+      WAF_URL: http://waf:8080
+      WAF_BLOCKLIST_DIR: /blocklist
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:-resilience_db}
+      PGUSER: remediation_ro
+      PGPASSWORD: ${REMEDIATION_DB_PASSWORD:?REMEDIATION_DB_PASSWORD manquant dans .env}
+    volumes:
+      - ./infra/placeholders/placeholder.py:/app/placeholder.py:ro
+      - ./ansible:/ansible:ro
+      - waf-blocklist:/blocklist
+    networks:
+      monitoring: { ipv4_address: 10.77.40.50 }
+      remediation: { ipv4_address: 10.77.50.50 }
+      app: { ipv4_address: 10.77.20.50 }
+      data: { ipv4_address: 10.77.30.50 }
+
+  # accès Docker pour la remédiation : lister et redémarrer les conteneurs, rien d'autre.
+  # wollomatic plutôt que tecnativa : tecnativa bloque le restart si POST=0 et autorise tout avec POST=1.
+  socket-proxy-remed:
+    <<: *defaults
+    image: wollomatic/socket-proxy:1.13.1
+    container_name: resilience-socket-proxy-remed
+    # groupe propriétaire de /var/run/docker.sock (1001 sous Docker Desktop, voir README pour le vérifier)
+    user: "65534:${DOCKER_SOCKET_GID:-1001}"
+    read_only: true
+    cap_drop: [ALL]
+    command:
+      - -loglevel=info
+      - -listenip=0.0.0.0
+      - -allowfrom=remediation
+      - -allowGET=(/v[0-9.]+)?/(_ping|version|info|containers/json|containers/[a-zA-Z0-9_.-]+/json|volumes|networks)
+      - -allowHEAD=(/v[0-9.]+)?/_ping
+      # pas de kill : un kill via l'API compte comme un arrêt manuel, Docker ne relancerait pas le conteneur
+      - -allowPOST=(/v[0-9.]+)?/containers/[a-zA-Z0-9_.-]+/restart
+      - -allowhealthcheck
+      - -watchdoginterval=30
+      - -stoponwatchdog
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    healthcheck:
+      test: ["CMD", "/healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks:
+      remediation: { ipv4_address: 10.77.50.61 }
 
 volumes:
   pgdata:
-    driver: local
+  prometheus-data:
+  grafana-data:
+  loki-data:
+  promtail-positions:
+  # liste de blocage du waf, en mémoire : vidée quand la stack est complètement arrêtée
+  waf-blocklist:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "uid=65534,gid=65534,mode=0755,size=1m"
 
 networks:
-  resilience-net:
-    driver: bridge
+  edge:
+    ipam:
+      config:
+        - subnet: 10.77.10.0/24
+  app:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.77.20.0/24
+  data:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.77.30.0/24
+  monitoring:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.77.40.0/24
+  remediation:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.77.50.0/24

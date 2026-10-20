@@ -1,0 +1,22 @@
+# /pay renvoie 201 même quand la transaction est refusée, on contrôle donc le statut métier
+- name: Vérifier la plateforme avec un paiement de test
+  ansible.builtin.uri:
+    url: "{{ verify_payment_url }}"
+    method: POST
+    body_format: json
+    body:
+      merchant_code: MERCH_ALPHA
+      amount: 1.00
+      currency: EUR
+      idempotency_key: "ANSIBLE-{{ now(utc=true).strftime('%Y%m%d%H%M%S%f') }}"
+    status_code: 201
+  register: payment
+  until: payment.status == 201 and payment.json.status == 'SUCCESS'
+  retries: 5
+  delay: 2
+  when: verify_payment | bool
+
+- name: Résultat du paiement de test
+  ansible.builtin.debug:
+    msg: "paiement de test {{ payment.json.reference }} : {{ payment.json.status }}"
+  when: verify_payment | bool

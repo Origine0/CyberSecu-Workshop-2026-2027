@@ -1,0 +1,22 @@
+# Restauration après compromission : contrôle d'intégrité de la base (lecture seule),
+# redémarrage de l'API, paiement de test, puis preuve de reprise.
+#   ansible-playbook /ansible/playbooks/restore_database.yml
+- name: Contrôler la base et relancer l'API
+  hosts: localhost
+  gather_facts: false
+  vars:
+    service: payment-api
+  tasks:
+    - name: Contrôle d'intégrité
+      ansible.builtin.include_role:
+        name: database_check
+    - name: Redémarrage de l'API
+      ansible.builtin.include_role:
+        name: service_restart
+    - name: Paiement de test
+      ansible.builtin.include_role:
+        name: payment_check
+    - name: Preuve de reprise
+      ansible.builtin.include_role:
+        name: database_check
+        tasks_from: proof
