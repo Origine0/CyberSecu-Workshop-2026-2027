@@ -1,9 +1,14 @@
 import time
-from datetime import datetime
+import uuid
+import logging
+import traceback
+from datetime import datetime, timezone
 from typing import List, Optional
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Depends, Request, Response, status, Query
+from fastapi import FastAPI, Depends, Request, Response, status, Query, HTTPException
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
@@ -14,6 +19,9 @@ from app.database import get_db, check_database_health
 from app.schemas import PaymentRequest, PaymentResponse, HealthResponse
 from app.services import process_payment
 from app.models import Transaction
+
+# Logger dédié à la sécurité et à la traçabilité des incidents (SOC / SIEM)
+security_logger = logging.getLogger("security.audit")
 
 # Suivi du temps de démarrage pour l'uptime de supervision
 START_TIME = time.time()
@@ -33,10 +41,10 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Configuration CORS pour autoriser le Dashboard Next.js
+# Configuration CORS pour autoriser le Dashboard
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # En lab/démonstration, autorise le frontend Next.js
+    allow_origins=["*"],  # En lab/démonstration, autorise le frontend
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -44,6 +52,83 @@ app.add_middleware(
 
 # Instrumentation Prometheus pour l'Axe 2 (Observabilité Prometheus/Grafana)
 instrumentator = Instrumentator().instrument(app)
+
+
+# ==============================================================================
+# GESTIONNAIRES D'EXCEPTIONS SÉCURISÉS (ANTI-FUITE D'INFORMATIONS / CWE-209)
+# ==============================================================================
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """
+    Gestionnaire global d'exceptions non gérées (Fail-Safe) :
+    - Enregistre la stack trace complète dans les logs sécurisés du serveur (Loki/Grafana)
+    - Masque TOUTE information système/chemin de fichier vis-à-vis du client externe
+    - Génère un incident_id unique pour corrélation SOC / SIEM
+    """
+    incident_id = f"SEC-ERR-{uuid.uuid4().hex[:8].upper()}"
+    client_ip = request.client.host if request.client else "unknown"
+    
+    security_logger.error(
+        f"[INCIDENT {incident_id}] Erreur non gérée sur {request.method} {request.url.path} "
+        f"depuis IP {client_ip}: {str(exc)}\n{traceback.format_exc()}"
+    )
+    
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "error": "INTERNAL_SERVER_ERROR",
+            "message": "Une défaillance interne est survenue. L'incident a été consigné pour analyse SOC.",
+            "incident_id": incident_id,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """
+    Gestionnaire des erreurs de validation Pydantic (HTTP 422) :
+    - Trace les payloads suspects ou malformés injectés (ex: fuzzing Red Team)
+    - Renvoie une réponse standardisée sans révéler d'arborescence interne
+    """
+    client_ip = request.client.host if request.client else "unknown"
+    security_logger.warning(
+        f"[SECURITY-AUDIT] Payload invalide rejeté (HTTP 422) sur {request.url.path} "
+        f"depuis IP {client_ip} : {len(exc.errors())} violation(s) de schéma."
+    )
+    
+    cleaned_errors = []
+    for err in exc.errors():
+        loc = [str(x) for x in err.get("loc", []) if x != "body"]
+        cleaned_errors.append({
+            "field": ".".join(loc) if loc else "root",
+            "reason": err.get("msg", "Format invalide"),
+            "type": err.get("type", "value_error")
+        })
+        
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={
+            "error": "VALIDATION_FAILED",
+            "message": "Le format de la requête enfreint les règles de sécurité et de conformité métier.",
+            "violations": cleaned_errors,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Gestionnaire standardisé des exceptions HTTP métier."""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": f"HTTP_{exc.status_code}",
+            "message": exc.detail,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    )
 
 
 @app.get("/", tags=["System"])
@@ -107,7 +192,7 @@ async def health_check(response: Response):
     """
     is_db_healthy = await check_database_health()
     uptime = round(time.time() - START_TIME, 2)
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     if not is_db_healthy:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
