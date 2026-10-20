@@ -25,9 +25,10 @@ RUN pip install --no-cache-dir --upgrade pip && \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Étape 3 : Copie de l'API et de la base documentaire
+# Étape 3 : Copie de l'API, de la base documentaire et de la baseline de trafic
 COPY api.py .
 COPY procedures.pdf .
+COPY traffic_baseline.csv* .
 
 # Exposition du port FastAPI
 EXPOSE 8000

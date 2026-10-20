@@ -78,6 +78,13 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+    volumes:
+      - ./backend-ia/traffic_baseline.csv:/app/traffic_baseline.csv:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 1024M
     networks:
       - resilience-net
 

@@ -58,12 +58,70 @@ app.add_middleware(
 # ==============================================================================
 # PILIER 1 : MODÈLE MACHINE LEARNING (ISOLATION FOREST SANS RÈGLES EN DUR)
 # ==============================================================================
-def init_ml_model() -> IsolationForest:
+model_metadata = {
+    "source": "synthetic_mock",
+    "samples_count": 0,
+    "healthy_samples": 0,
+    "attack_samples": 0,
+    "contamination": 0.05
+}
+
+def init_ml_model(csv_path: Optional[str] = None) -> IsolationForest:
     """
-    Initialise et calibre le modèle Isolation Forest sur une baseline statistique
-    de trafic nominal web simulé (requêtes, erreurs, latence).
+    Initialise et calibre le modèle Isolation Forest :
+    1. Si traffic_baseline.csv est disponible (livré par Infra/Cyber) :
+       - Calibre le modèle sur les vraies données saines (label == 0)
+       - Calcule la proportion réelle d'attaques (label == 1) pour ajuster le taux de contamination
+    2. Sinon : fallback sur la baseline statistique mockée.
     Aucune règle déterministe (seuil en dur) n'est utilisée.
     """
+    global model_metadata
+    target_csv = csv_path or os.getenv("TRAFFIC_BASELINE_FILE", "traffic_baseline.csv")
+    
+    if os.path.exists(target_csv):
+        try:
+            logger.info(f"Chargement du jeu de données réel de baseline : {target_csv}")
+            df = pd.read_csv(target_csv)
+            required_cols = {"request_rate", "error_rate", "latency_ms", "label"}
+            
+            if required_cols.issubset(df.columns):
+                # 1. Sélection des données saines pour l'apprentissage du profil normal
+                healthy_df = df[df["label"] == 0][["request_rate", "error_rate", "latency_ms"]]
+                n_healthy = len(healthy_df)
+                n_total = len(df)
+                n_attacks = len(df[df["label"] == 1])
+                
+                # 2. Calcul du taux de contamination réel issu des tirs de test
+                raw_contamination = (n_attacks / n_total) if n_total > 0 and n_attacks > 0 else 0.05
+                # Borne de sécurité Scikit-Learn (entre 1% et 25%)
+                contamination = float(np.clip(raw_contamination, 0.01, 0.25))
+                
+                logger.info(
+                    f"Calibration sur données réelles : {n_healthy} échantillons sains, "
+                    f"{n_attacks} attaques. Taux de contamination ajusté à {contamination:.4f}"
+                )
+                
+                clf = IsolationForest(
+                    n_estimators=100,
+                    contamination=contamination,
+                    random_state=42
+                )
+                clf.fit(healthy_df)
+                
+                model_metadata = {
+                    "source": os.path.basename(target_csv),
+                    "samples_count": n_total,
+                    "healthy_samples": n_healthy,
+                    "attack_samples": n_attacks,
+                    "contamination": round(contamination, 4)
+                }
+                logger.info("Modèle Isolation Forest entraîné sur données réelles avec succès.")
+                return clf
+            else:
+                logger.warning(f"Le fichier {target_csv} ne contient pas les colonnes requises : {required_cols}. Fallback mock.")
+        except Exception as e:
+            logger.error(f"Erreur lors de la lecture de {target_csv} : {e}. Fallback mock.")
+
     logger.info("Entraînement de la baseline normale Isolation Forest (300 échantillons mock)...")
     np.random.seed(42)
     n_samples = 300
@@ -85,7 +143,14 @@ def init_ml_model() -> IsolationForest:
         random_state=42
     )
     clf.fit(normal_traffic)
-    logger.info("Modèle Isolation Forest entraîné et opérationnel.")
+    model_metadata = {
+        "source": "synthetic_mock",
+        "samples_count": n_samples,
+        "healthy_samples": n_samples,
+        "attack_samples": 0,
+        "contamination": 0.05
+    }
+    logger.info("Modèle Isolation Forest entraîné et opérationnel (mode mock).")
     return clf
 
 model = init_ml_model()
@@ -187,14 +252,29 @@ class RAGResponse(BaseModel):
 # ==============================================================================
 @app.get("/", tags=["Health"])
 def root():
-    """Healthcheck général du conteneur."""
+    """Healthcheck général du conteneur et statut d'entraînement du modèle."""
     return {
         "service": "PROJECT RESILIENCE-ALPHA Engine",
         "status": "OPERATIONAL",
         "ml_model_loaded": model is not None,
+        "model_metadata": model_metadata,
         "rag_vector_db_loaded": vector_db is not None,
         "ollama_endpoint": OLLAMA_BASE_URL,
         "ollama_model": OLLAMA_MODEL
+    }
+
+@app.post("/retrain", tags=["ML Detection"])
+def retrain_model():
+    """
+    Déclenche le ré-entraînement à chaud du modèle Isolation Forest
+    sur le fichier de métriques traffic_baseline.csv fourni par Infra/Cyber.
+    """
+    global model
+    model = init_ml_model()
+    return {
+        "status": "SUCCESS",
+        "message": "Isolation Forest ré-entraîné et calibré avec succès.",
+        "model_metadata": model_metadata
     }
 
 @app.post("/analyze", response_model=AnalysisResponse, tags=["ML Detection"])
