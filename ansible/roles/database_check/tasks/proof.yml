@@ -1,4 +1,4 @@
-# « Preuve de reprise » : requête CTE d'Antoine (database/queries_analytics.sql, requête 3).
+# « Preuve de reprise » : requête CTE de database/queries_analytics.sql (requête 3).
 # Compare la disponibilité avant l'incident, pendant, et dans les 2 dernières minutes.
 - name: Calculer la preuve de reprise
   ansible.builtin.command:

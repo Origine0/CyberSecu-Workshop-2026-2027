@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     CHAOS_MODE_ENABLED: bool = False
     MOCK_LATENCY_MS: int = 25
 
+    # Clé secrète / token de sécurisation des endpoints de remédiation WAF (/waf/block, /waf/unblock)
+    REMEDIATION_TOKEN: str = "resilience-remediation-secret"
+
     class Config:
         env_file = ".env"
         case_sensitive = True
