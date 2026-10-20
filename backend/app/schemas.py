@@ -25,6 +25,7 @@ class PaymentResponse(BaseModel):
     latency_ms: int
     error_code: Optional[str] = None
     message: str
+    balance_after: Optional[float] = None  # solde du compte authentifié après opération
 
 
 class HealthResponse(BaseModel):

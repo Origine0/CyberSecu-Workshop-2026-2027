@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     def async_database_url(self) -> str:
         return f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
 
+    # Authentification : secret JWT partagé avec le service auth
+    JWT_SECRET: Optional[str] = None
+    REQUIRE_AUTH: bool = False
+
     # Dégradation simulée / injection de pannes (pour tests Red Team et chaos engineering)
     CHAOS_MODE_ENABLED: bool = False
     MOCK_LATENCY_MS: int = 25

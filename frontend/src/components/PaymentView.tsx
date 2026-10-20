@@ -12,12 +12,16 @@ import {
 import { PaymentRequest, Transaction } from '../types/index.ts';
 import { INITIAL_MERCHANTS, validatePaymentRequest } from '../utils/paymentEngine.ts';
 import { AnimatedPaymentCard } from './AnimatedPaymentCard.tsx';
+import { Account } from '../utils/api.ts';
 
 interface PaymentViewProps {
   onProcessPayment: (req: PaymentRequest) => { transaction: Transaction; isIdempotent: boolean };
   onViewDashboard: () => void;
   onViewSql: () => void;
   isDegraded: boolean;
+  account: Account | null;
+  onRemotePayment: (req: PaymentRequest) => Promise<Transaction>;
+  onGoToAccount: () => void;
 }
 
 export const PaymentView: React.FC<PaymentViewProps> = ({
@@ -25,6 +29,9 @@ export const PaymentView: React.FC<PaymentViewProps> = ({
   onViewDashboard,
   onViewSql,
   isDegraded,
+  account,
+  onRemotePayment,
+  onGoToAccount,
 }) => {
   const [amount, setAmount] = useState('49.90');
   const [merchantId, setMerchantId] = useState(INITIAL_MERCHANTS[0].id);
@@ -80,13 +87,18 @@ export const PaymentView: React.FC<PaymentViewProps> = ({
     setLoading(true);
     setLastTransaction(null);
 
-    await new Promise((r) => setTimeout(r, 450));
-
-    const result = onProcessPayment(payload);
-    setLastTransaction(result.transaction);
+    let transaction: Transaction;
+    try {
+      transaction = await onRemotePayment(payload);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Paiement impossible');
+      setLoading(false);
+      return;
+    }
+    setLastTransaction(transaction);
     setLoading(false);
 
-    if (result.transaction.status === 'CONFIRMED') {
+    if (transaction.status === 'CONFIRMED') {
       try {
         confetti({
           particleCount: 40,
@@ -113,8 +125,19 @@ export const PaymentView: React.FC<PaymentViewProps> = ({
           Paiement
         </h1>
         <p className="text-xs text-zinc-400 mt-1 font-normal">
-          Simulation de paiement direct · Route FastAPI POST /pay
+          {account
+            ? 'Paiement réel · POST /api/pay · débit du solde de votre compte'
+            : 'Paiement par carte · POST /api/pay · persistance PostgreSQL'}
         </p>
+        {account ? (
+          <p className="text-xs text-zinc-600 mt-2">
+            Solde : <span className="font-semibold">{account.balance.toFixed(2)} €</span>
+          </p>
+        ) : (
+          <button onClick={onGoToAccount} className="text-xs text-zinc-900 font-medium underline underline-offset-4 mt-2">
+            Se connecter pour payer avec mon solde
+          </button>
+        )}
 
         {/* Minimal Amount Presets */}
         <div className="flex items-center justify-center gap-2 mt-5">

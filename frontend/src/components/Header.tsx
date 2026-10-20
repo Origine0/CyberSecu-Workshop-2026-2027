@@ -4,17 +4,19 @@ import {
   LayoutDashboard, 
   Terminal, 
   Database, 
-  FolderArchive 
+  UserRound
 } from 'lucide-react';
 import { HealthCheckResponse } from '../types/index.ts';
+import { Account } from '../utils/api.ts';
 
 interface HeaderProps {
-  activeTab: 'pay' | 'dashboard' | 'fastapi' | 'sql' | 'files';
-  setActiveTab: (tab: 'pay' | 'dashboard' | 'fastapi' | 'sql' | 'files') => void;
+  activeTab: 'pay' | 'dashboard' | 'fastapi' | 'sql' | 'account';
+  setActiveTab: (tab: 'pay' | 'dashboard' | 'fastapi' | 'sql' | 'account') => void;
   health: HealthCheckResponse;
   isDegraded: boolean;
   onToggleDegraded: () => void;
   transactionCount: number;
+  account: Account | null;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -24,6 +26,7 @@ export const Header: React.FC<HeaderProps> = ({
   isDegraded,
   onToggleDegraded,
   transactionCount,
+  account,
 }) => {
   return (
     <header className="border-b border-zinc-200/70 bg-white/80 backdrop-blur-md sticky top-0 z-50">
@@ -97,15 +100,15 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
 
             <button
-              onClick={() => setActiveTab('files')}
+              onClick={() => setActiveTab('account')}
               className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                activeTab === 'files'
+                activeTab === 'account'
                   ? 'bg-white text-zinc-950 shadow-xs'
                   : 'text-zinc-600 hover:text-zinc-950'
               }`}
             >
-              <FolderArchive className="w-3.5 h-3.5" />
-              <span>Fichiers</span>
+              <UserRound className="w-3.5 h-3.5" />
+              <span>{account ? `${account.balance.toFixed(2)} €` : 'Compte'}</span>
             </button>
           </nav>
 

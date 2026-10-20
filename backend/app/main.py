@@ -19,6 +19,7 @@ from app.database import get_db, check_database_health
 from app.schemas import PaymentRequest, PaymentResponse, HealthResponse
 from app.services import process_payment
 from app.models import Transaction
+from app.auth import get_claims
 
 # Logger dédié à la sécurité et à la traçabilité des incidents (SOC / SIEM)
 security_logger = logging.getLogger("security.audit")
@@ -177,7 +178,8 @@ async def create_payment(
         db=db,
         request=request,
         client_ip=client_ip,
-        user_agent=user_agent
+        user_agent=user_agent,
+        claims=get_claims(req)
     )
     return response
 
@@ -249,6 +251,10 @@ async def list_recent_transactions(
             "status": tx.status,
             "latency_ms": tx.latency_ms,
             "error_code": tx.error_code,
+            "error_message": tx.error_message,
+            "ip_address": tx.ip_address,
+            "idempotency_key": tx.idempotency_key,
+            "metadata": tx.metadata_ or {},
             "created_at": tx.created_at.isoformat() if tx.created_at else None
         }
         for tx in txs

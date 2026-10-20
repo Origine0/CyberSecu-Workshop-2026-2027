@@ -31,6 +31,17 @@ CREATE TABLE IF NOT EXISTS accounts (
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Utilisateurs authentifiés (service auth) : un utilisateur = un compte bancaire fictif
+-- (le service auth crée aussi cette table au démarrage si elle manque, ex. volume existant)
+CREATE TABLE IF NOT EXISTS users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username VARCHAR(40) UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+    role VARCHAR(20) NOT NULL DEFAULT 'CUSTOMER',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Table principale des transactions de paiement
 CREATE TABLE IF NOT EXISTS transactions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
