@@ -25,6 +25,7 @@ ENV/
 .env.production.local
 *.pem
 *.key
+key.txt
 
 # Operating System & IDEs
 .DS_Store
@@ -40,3 +41,12 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .system_generated/
+
+# Protection des secrets et clés de chiffrement (SOPS / age)
+key.txt
+*.key
+*.pem
+*.env
+.env.local
+.env.*.local
+!*.enc.env
