@@ -3,7 +3,9 @@ import {
   Send, 
   Copy, 
   Check, 
-  Activity 
+  Activity,
+  Cpu,
+  Bot
 } from 'lucide-react';
 import { PaymentRequest, Transaction, HealthCheckResponse } from '../types/index.ts';
 import { INITIAL_MERCHANTS } from '../utils/paymentEngine.ts';
@@ -21,17 +23,28 @@ export const FastApiExplorer: React.FC<FastApiExplorerProps> = ({
   onProcessPayment,
   isDegraded,
 }) => {
-  const [activeRoute, setActiveRoute] = useState<'health' | 'pay'>('health');
+  const [activeRoute, setActiveRoute] = useState<'health' | 'pay' | 'analyze' | 'ask'>('health');
   const [copiedCurl, setCopiedCurl] = useState(false);
 
+  // States pour /pay
   const [payAmount, setPayAmount] = useState('79.50');
   const [payMerchant, setPayMerchant] = useState(INITIAL_MERCHANTS[0].id);
   const [payCustomer, setPayCustomer] = useState('Jean Valjean');
   const [payCard, setPayCard] = useState('4242424242424242');
   const [payExp, setPayExp] = useState('11/27');
   const [payCvv, setPayCvv] = useState('456');
-
   const [lastPayResponse, setLastPayResponse] = useState<any>(null);
+
+  // States pour /analyze (IA ML)
+  const [aiReqRate, setAiReqRate] = useState('50.0');
+  const [aiErrRate, setAiErrRate] = useState('0.015');
+  const [aiLatency, setAiLatency] = useState('120.0');
+  const [lastAiResponse, setLastAiResponse] = useState<any>(null);
+
+  // States pour /ask (IA RAG)
+  const [ragQuery, setRagQuery] = useState("Quelle est la procédure en cas d'attaque par déni de service ?");
+  const [lastRagResponse, setLastRagResponse] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
 
   const handleTestPay = (e: React.FormEvent) => {
     e.preventDefault();
@@ -52,13 +65,82 @@ export const FastApiExplorer: React.FC<FastApiExplorerProps> = ({
     });
   };
 
+  const handleTestAnalyze = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    const payload = {
+      timestamp: new Date().toISOString(),
+      request_rate: parseFloat(aiReqRate) || 50.0,
+      error_rate: parseFloat(aiErrRate) || 0.01,
+      latency_ms: parseFloat(aiLatency) || 120.0,
+    };
+
+    try {
+      const res = await fetch('http://localhost:8001/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      setLastAiResponse({ status: res.status, ...data });
+    } catch {
+      // Simulation locale si non connecté
+      const isOutlier = payload.request_rate > 200 || payload.error_rate > 0.05 || payload.latency_ms > 400;
+      setLastAiResponse({
+        status: 200,
+        timestamp: payload.timestamp,
+        is_anomaly: isOutlier,
+        action_required: isOutlier ? 'TRIGGER_REMEDIATION' : 'NONE',
+        anomaly_score: isOutlier ? -0.197 : 0.168,
+        metrics_received: payload,
+        note: 'Réponse simulée en local (démarrez docker compose pour le serveur Python)'
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleTestAsk = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const res = await fetch('http://localhost:8001/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: ragQuery }),
+      });
+      const data = await res.json();
+      setLastRagResponse({ status: res.status, ...data });
+    } catch {
+      setLastRagResponse({
+        status: 200,
+        query: ragQuery,
+        response: "[Procédure locale FAISS] Conformément aux directives de sécurité : en cas d'attaque par déni de service, isoler immédiatement le conteneur cible en appliquant le playbook Ansible Zero-Touch. Rappel : Ce modèle est strictement consultatif et ne possède aucun privilège de remédiation.",
+        status_text: "FALLBACK_OFFLINE",
+        advisory_role: "READ_ONLY_NO_REMEDIATION"
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const getCurlCommand = () => {
     if (activeRoute === 'health') {
       return `curl -s http://localhost:8000/health`;
     }
-    return `curl -X POST http://localhost:8000/pay \\
+    if (activeRoute === 'pay') {
+      return `curl -X POST http://localhost:8000/pay \\
   -H "Content-Type: application/json" \\
-  -d '{"amount": ${payAmount}, "merchant_id": "${payMerchant}", "customer_name": "${payCustomer}", "card_number": "${payCard}", "exp_date": "${payExp}", "cvv": "${payCvv}"}'`;
+  -d '{"merchant_code": "MERCH_ALPHA", "amount": ${payAmount}, "currency": "EUR"}'`;
+    }
+    if (activeRoute === 'analyze') {
+      return `curl -X POST http://localhost:8001/analyze \\
+  -H "Content-Type: application/json" \\
+  -d '{"timestamp": "${new Date().toISOString()}", "request_rate": ${aiReqRate}, "error_rate": ${aiErrRate}, "latency_ms": ${aiLatency}}'`;
+    }
+    return `curl -X POST http://localhost:8001/ask \\
+  -H "Content-Type: application/json" \\
+  -d '{"query": "${ragQuery}"}'`;
   };
 
   const copyCurl = () => {
@@ -76,15 +158,15 @@ export const FastApiExplorer: React.FC<FastApiExplorerProps> = ({
             Console FastAPI
           </h1>
           <p className="text-xs text-zinc-400 mt-1 font-normal">
-            Exécution et test des routes /health et /pay
+            Exécution et test interactif des microservices Métier (:8000) et IA (:8001)
           </p>
         </div>
 
         {/* Minimal Route Switcher */}
-        <div className="p-1 bg-zinc-100 rounded-xl flex items-center text-xs self-start sm:self-auto">
+        <div className="p-1 bg-zinc-100 rounded-xl flex items-center text-xs self-start sm:self-auto overflow-x-auto">
           <button
             onClick={() => setActiveRoute('health')}
-            className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
+            className={`px-3 py-1.5 rounded-lg font-medium transition-all cursor-pointer ${
               activeRoute === 'health'
                 ? 'bg-white text-zinc-950 shadow-2xs font-semibold'
                 : 'text-zinc-500 hover:text-zinc-950'
@@ -94,13 +176,35 @@ export const FastApiExplorer: React.FC<FastApiExplorerProps> = ({
           </button>
           <button
             onClick={() => setActiveRoute('pay')}
-            className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
+            className={`px-3 py-1.5 rounded-lg font-medium transition-all cursor-pointer ${
               activeRoute === 'pay'
                 ? 'bg-white text-zinc-950 shadow-2xs font-semibold'
                 : 'text-zinc-500 hover:text-zinc-950'
             }`}
           >
             POST /pay
+          </button>
+          <button
+            onClick={() => setActiveRoute('analyze')}
+            className={`px-3 py-1.5 rounded-lg font-medium transition-all cursor-pointer flex items-center gap-1 ${
+              activeRoute === 'analyze'
+                ? 'bg-white text-cyan-900 shadow-2xs font-semibold'
+                : 'text-zinc-500 hover:text-zinc-950'
+            }`}
+          >
+            <Cpu className="w-3 h-3 text-cyan-600" />
+            <span>POST /analyze</span>
+          </button>
+          <button
+            onClick={() => setActiveRoute('ask')}
+            className={`px-3 py-1.5 rounded-lg font-medium transition-all cursor-pointer flex items-center gap-1 ${
+              activeRoute === 'ask'
+                ? 'bg-white text-purple-900 shadow-2xs font-semibold'
+                : 'text-zinc-500 hover:text-zinc-950'
+            }`}
+          >
+            <Bot className="w-3 h-3 text-purple-600" />
+            <span>POST /ask</span>
           </button>
         </div>
       </div>
@@ -109,7 +213,7 @@ export const FastApiExplorer: React.FC<FastApiExplorerProps> = ({
         
         {/* Left: Input */}
         <div className="md:col-span-5 bg-white p-5 rounded-2xl border border-zinc-200/80 shadow-xs space-y-4">
-          {activeRoute === 'health' ? (
+          {activeRoute === 'health' && (
             <div className="space-y-4">
               <div className="p-3.5 rounded-xl bg-zinc-50/80 border border-zinc-100 text-xs space-y-2">
                 <div className="flex justify-between">
@@ -128,13 +232,15 @@ export const FastApiExplorer: React.FC<FastApiExplorerProps> = ({
 
               <button
                 onClick={onRefreshHealth}
-                className="w-full py-2.5 rounded-xl bg-zinc-950 hover:bg-zinc-800 text-white font-medium text-xs flex items-center justify-center gap-1.5 transition-all shadow-xs"
+                className="w-full py-2.5 rounded-xl bg-zinc-950 hover:bg-zinc-800 text-white font-medium text-xs flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer"
               >
                 <Activity className="w-3.5 h-3.5" />
                 <span>Tester la sonde</span>
               </button>
             </div>
-          ) : (
+          )}
+
+          {activeRoute === 'pay' && (
             <form onSubmit={handleTestPay} className="space-y-3">
               <div>
                 <label className="block text-xs font-medium text-zinc-500 mb-1">
@@ -156,7 +262,7 @@ export const FastApiExplorer: React.FC<FastApiExplorerProps> = ({
                 </label>
                 <select
                   value={payMerchant}
-                  onChange={(e) => setMerchantId(e.target.value)}
+                  onChange={(e) => setPayMerchant(e.target.value)}
                   className="w-full px-3 py-1.5 bg-zinc-50/80 border border-zinc-200 rounded-xl text-xs text-zinc-900 focus:outline-none focus:bg-white focus:border-zinc-950"
                 >
                   {INITIAL_MERCHANTS.map((m) => (
@@ -182,10 +288,95 @@ export const FastApiExplorer: React.FC<FastApiExplorerProps> = ({
 
               <button
                 type="submit"
-                className="w-full py-2.5 rounded-xl bg-zinc-950 hover:bg-zinc-800 text-white font-medium text-xs flex items-center justify-center gap-1.5 transition-all shadow-xs"
+                className="w-full py-2.5 rounded-xl bg-zinc-950 hover:bg-zinc-800 text-white font-medium text-xs flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer"
               >
                 <Send className="w-3.5 h-3.5" />
-                <span>Envoyer</span>
+                <span>Envoyer transaction</span>
+              </button>
+            </form>
+          )}
+
+          {activeRoute === 'analyze' && (
+            <form onSubmit={handleTestAnalyze} className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-zinc-500 mb-1">
+                  Taux de requêtes (req/s)
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={aiReqRate}
+                  onChange={(e) => setAiReqRate(e.target.value)}
+                  required
+                  className="w-full px-3 py-1.5 bg-zinc-50/80 border border-zinc-200 rounded-xl text-xs text-zinc-900 focus:outline-none focus:bg-white focus:border-cyan-600"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-zinc-500 mb-1">
+                  Taux d'erreur (0.0 à 1.0)
+                </label>
+                <input
+                  type="number"
+                  step="0.005"
+                  value={aiErrRate}
+                  onChange={(e) => setAiErrRate(e.target.value)}
+                  required
+                  className="w-full px-3 py-1.5 bg-zinc-50/80 border border-zinc-200 rounded-xl text-xs text-zinc-900 focus:outline-none focus:bg-white focus:border-cyan-600"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-zinc-500 mb-1">
+                  Latence moyenne (ms)
+                </label>
+                <input
+                  type="number"
+                  step="1"
+                  value={aiLatency}
+                  onChange={(e) => setAiLatency(e.target.value)}
+                  required
+                  className="w-full px-3 py-1.5 bg-zinc-50/80 border border-zinc-200 rounded-xl text-xs text-zinc-900 focus:outline-none focus:bg-white focus:border-cyan-600"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-2.5 rounded-xl bg-cyan-700 hover:bg-cyan-800 text-white font-medium text-xs flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:opacity-50"
+              >
+                <Cpu className="w-3.5 h-3.5" />
+                <span>{loading ? 'Calcul Isolation Forest...' : 'Inférence ML /analyze'}</span>
+              </button>
+            </form>
+          )}
+
+          {activeRoute === 'ask' && (
+            <form onSubmit={handleTestAsk} className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-zinc-500 mb-1">
+                  Question pour l'assistant RAG
+                </label>
+                <textarea
+                  rows={3}
+                  value={ragQuery}
+                  onChange={(e) => setRagQuery(e.target.value)}
+                  required
+                  className="w-full px-3 py-1.5 bg-zinc-50/80 border border-zinc-200 rounded-xl text-xs text-zinc-900 focus:outline-none focus:bg-white focus:border-purple-600"
+                />
+              </div>
+
+              <div className="p-2.5 rounded-xl bg-purple-50/60 border border-purple-100 text-[11px] text-purple-800">
+                L'assistant analyse <strong>procedures.pdf</strong> via FAISS et Ollama (qwen2.5:1.5b). Rôle strictement consultatif.
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading || !ragQuery.trim()}
+                className="w-full py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-medium text-xs flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:opacity-50"
+              >
+                <Bot className="w-3.5 h-3.5" />
+                <span>{loading ? 'Génération en cours...' : 'Interroger le RAG /ask'}</span>
               </button>
             </form>
           )}
@@ -196,7 +387,7 @@ export const FastApiExplorer: React.FC<FastApiExplorerProps> = ({
               <span>cURL</span>
               <button
                 onClick={copyCurl}
-                className="text-zinc-600 hover:text-zinc-900 flex items-center gap-1"
+                className="text-zinc-600 hover:text-zinc-900 flex items-center gap-1 cursor-pointer"
               >
                 {copiedCurl ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
                 <span>{copiedCurl ? 'Copié' : 'Copier'}</span>
@@ -213,7 +404,13 @@ export const FastApiExplorer: React.FC<FastApiExplorerProps> = ({
           <div className="flex items-center justify-between pb-2 border-b border-zinc-100 text-xs">
             <span className="text-zinc-400 font-medium">Réponse HTTP</span>
             <span className="text-emerald-600 font-medium">
-              {activeRoute === 'health' ? '200 OK' : lastPayResponse ? `${lastPayResponse.status}` : 'Prêt'}
+              {activeRoute === 'health' 
+                ? '200 OK' 
+                : activeRoute === 'pay' 
+                ? (lastPayResponse ? `${lastPayResponse.status}` : 'Prêt')
+                : activeRoute === 'analyze'
+                ? (lastAiResponse ? `${lastAiResponse.status}` : 'Prêt')
+                : (lastRagResponse ? `${lastRagResponse.status}` : 'Prêt')}
             </span>
           </div>
 
@@ -221,9 +418,11 @@ export const FastApiExplorer: React.FC<FastApiExplorerProps> = ({
             <code>
               {activeRoute === 'health'
                 ? JSON.stringify(health, null, 2)
-                : lastPayResponse
-                ? JSON.stringify(lastPayResponse, null, 2)
-                : `// Prêt. Cliquez sur "Envoyer" pour tester.`}
+                : activeRoute === 'pay'
+                ? (lastPayResponse ? JSON.stringify(lastPayResponse, null, 2) : `// Prêt. Cliquez sur "Envoyer transaction" pour tester.`)
+                : activeRoute === 'analyze'
+                ? (lastAiResponse ? JSON.stringify(lastAiResponse, null, 2) : `// Prêt. Cliquez sur "Inférence ML /analyze" pour tester.`)
+                : (lastRagResponse ? JSON.stringify(lastRagResponse, null, 2) : `// Prêt. Cliquez sur "Interroger le RAG /ask" pour tester.`)}
             </code>
           </pre>
         </div>

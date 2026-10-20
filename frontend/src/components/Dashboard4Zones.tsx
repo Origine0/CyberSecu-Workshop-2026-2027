@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { Transaction, HealthCheckResponse } from '../types/index.ts';
 import { LiveResiliencePipeline } from './LiveResiliencePipeline.tsx';
+import { AiCyberSocPanel } from './AiCyberSocPanel.tsx';
 
 interface Dashboard4ZonesProps {
   transactions: Transaction[];
@@ -248,23 +249,7 @@ export const Dashboard4Zones: React.FC<Dashboard4ZonesProps> = ({
                 </span>
               </div>
             ) : (
-              <div className="space-y-2.5">
-                <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-50/80 border border-zinc-100 text-xs">
-                  <span className="font-medium text-zinc-900">Niveau de menace</span>
-                  <span className={`font-semibold ${isDegraded ? 'text-amber-600' : 'text-emerald-600'}`}>
-                    {isDegraded ? 'Alerte modérée' : 'Nominal'}
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-50/80 border border-zinc-100 text-xs">
-                  <span className="font-medium text-zinc-900">Modèle AIOps</span>
-                  <span className="text-zinc-500">Isolation Forest</span>
-                </div>
-
-                <div className="p-3 rounded-xl bg-zinc-50/80 border border-zinc-100 text-xs text-zinc-600 truncate">
-                  {isDegraded ? 'Attention : Surcharge détectée sur /pay' : 'Signature SHA-256 validée sur le flux'}
-                </div>
-              </div>
+              <AiCyberSocPanel isDegraded={isDegraded} />
             )}
           </div>
           <div className="pt-3 mt-4 border-t border-zinc-100 flex justify-between text-xs text-zinc-400">
