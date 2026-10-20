@@ -89,3 +89,37 @@ export interface ProjectSourceFile {
   badge?: string;
   content: string;
 }
+
+
+// ==============================================================================
+// Pilier IA & Data (Détection ML & Assistant RAG)
+// ==============================================================================
+export interface AiAnalyzeRequest {
+  timestamp: string;
+  request_rate: number;
+  error_rate: number;
+  latency_ms: number;
+}
+
+export interface AiAnalyzeResponse {
+  timestamp: string;
+  is_anomaly: boolean;
+  action_required: 'TRIGGER_REMEDIATION' | 'NONE';
+  anomaly_score: number;
+  metrics_received: {
+    request_rate: number;
+    error_rate: number;
+    latency_ms: number;
+  };
+}
+
+export interface AiAskRequest {
+  query: string;
+}
+
+export interface AiAskResponse {
+  query: string;
+  response: string;
+  status: string;
+  advisory_role?: string;
+}
