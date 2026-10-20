@@ -14,6 +14,8 @@ import logging
 from typing import Optional
 import numpy as np
 import pandas as pd
+import json
+import joblib
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -39,6 +41,8 @@ logger = logging.getLogger("RESILIENCE-API")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b")
 PROCEDURES_FILE = os.getenv("PROCEDURES_FILE", "procedures.pdf")
+MODEL_FILE = os.getenv("MODEL_FILE", "isolation_forest_model.joblib")
+METRICS_FILE = os.getenv("METRICS_FILE", "model_metrics.json")
 
 app = FastAPI(
     title="PROJECT RESILIENCE-ALPHA - ML Detection & RAG Advisory Engine",
@@ -69,13 +73,37 @@ model_metadata = {
 def init_ml_model(csv_path: Optional[str] = None) -> IsolationForest:
     """
     Initialise et calibre le modèle Isolation Forest :
-    1. Si traffic_baseline.csv est disponible (livré par Infra/Cyber) :
-       - Calibre le modèle sur les vraies données saines (label == 0)
-       - Calcule la proportion réelle d'attaques (label == 1) pour ajuster le taux de contamination
-    2. Sinon : fallback sur la baseline statistique mockée.
+    1. Si un modèle pré-entraîné Joblib est disponible, le charger instantanément avec ses métriques.
+    2. Sinon, si traffic_baseline.csv est disponible, calibration dynamique.
+    3. Sinon : fallback sur la baseline statistique mockée.
     Aucune règle déterministe (seuil en dur) n'est utilisée.
     """
     global model_metadata
+
+    # Étape 1 : Chargement du modèle pré-entraîné sérialisé (optimisation temps réel)
+    if os.path.exists(MODEL_FILE):
+        try:
+            logger.info(f"Chargement du modèle pré-entraîné Joblib : {MODEL_FILE}")
+            clf = joblib.load(MODEL_FILE)
+            metrics_info = {}
+            if os.path.exists(METRICS_FILE):
+                with open(METRICS_FILE, "r", encoding="utf-8") as mf:
+                    metrics_info = json.load(mf)
+
+            model_metadata = {
+                "source": "pre_trained_joblib",
+                "model_file": MODEL_FILE,
+                "n_estimators": getattr(clf, "n_estimators", 150),
+                "contamination": getattr(clf, "contamination", 0.035),
+                "metrics": metrics_info.get("classification_metrics", {}),
+                "dataset_size": metrics_info.get("dataset_size", 1500),
+                "trained_at_utc": metrics_info.get("trained_at_utc", "")
+            }
+            logger.info(f"Modèle Isolation Forest opérationnel (ROC-AUC: {model_metadata.get('metrics', {}).get('roc_auc', 'N/A')}).")
+            return clf
+        except Exception as e:
+            logger.error(f"Erreur lors du chargement du fichier {MODEL_FILE} : {e}")
+
     target_csv = csv_path or os.getenv("TRAFFIC_BASELINE_FILE", "traffic_baseline.csv")
     
     if os.path.exists(target_csv):
@@ -261,6 +289,24 @@ def root():
         "rag_vector_db_loaded": vector_db is not None,
         "ollama_endpoint": OLLAMA_BASE_URL,
         "ollama_model": OLLAMA_MODEL
+    }
+
+@app.get("/model/metrics", tags=["ML Detection"])
+def get_model_evaluation_metrics():
+    """
+    Retourne le rapport scientifique d'évaluation du modèle ML
+    (Precision, Recall, F1-Score, ROC-AUC, matrice de confusion, vitesse d'inférence).
+    """
+    if os.path.exists(METRICS_FILE):
+        try:
+            with open(METRICS_FILE, "r", encoding="utf-8") as mf:
+                return json.load(mf)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    return {
+        "status": "MOCK_BASELINE",
+        "metadata": model_metadata,
+        "note": "Exécutez train_model.py pour régénérer le rapport complet."
     }
 
 @app.post("/retrain", tags=["ML Detection"])

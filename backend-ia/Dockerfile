@@ -29,6 +29,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY api.py .
 COPY procedures.pdf .
 COPY traffic_baseline.csv* .
+COPY isolation_forest_model.joblib* .
+COPY model_metrics.json* .
+COPY train_model.py* .
 
 # Exposition du port FastAPI
 EXPOSE 8000
