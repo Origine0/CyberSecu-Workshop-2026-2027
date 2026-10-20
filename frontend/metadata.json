@@ -1,0 +1,8 @@
+{
+  "name": "Project RESILIENCE-ALPHA - Système de Paiement & Dashboard",
+  "description": "Plateforme de cyber-résilience (Sprint 1 EPSI Bac+5) : Paiement convivial, Maquette Dashboard 4 zones, API FastAPI (/pay & /health) et architecture PostgreSQL avec requêtes SQL propres et CTEs analytiques.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
