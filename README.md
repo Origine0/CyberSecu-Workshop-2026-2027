@@ -51,7 +51,19 @@ WORKSHOP_2026_2027/
 
 ## 🚀 Démarrage Rapide
 
-### 1. Lancement de l'Infrastructure Conteneurisée (PostgreSQL & FastAPI)
+### 1. Déchiffrement des Secrets (SOPS + age)
+
+Les secrets de configuration du projet sont chiffrés avec SOPS et la clé `age`. Pour générer le fichier local `.env` :
+
+```bash
+# Déchiffrement direct :
+sops -d .env.enc > .env
+
+# Ou via le script d'automatisation :
+./scripts/decrypt_secrets.sh
+```
+
+### 2. Lancement de l'Infrastructure Conteneurisée (PostgreSQL & FastAPI)
 
 Depuis la racine du projet :
 ```bash

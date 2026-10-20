@@ -5,7 +5,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-resilience_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-resilience_pass}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Erreur mot de passe requis depuis .env chiffré SOPS}
       POSTGRES_DB: ${POSTGRES_DB:-resilience_db}
     ports:
       - "${POSTGRES_HOST_PORT:-5433}:5432"
@@ -29,7 +29,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-resilience_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-resilience_pass}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Erreur mot de passe requis depuis .env chiffré SOPS}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: ${POSTGRES_DB:-resilience_db}
