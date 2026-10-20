@@ -7,9 +7,9 @@ class Settings(BaseSettings):
     VERSION: str = "1.0.0"
     ENVIRONMENT: str = "production"
     
-    # Configuration PostgreSQL
+    # Configuration PostgreSQL (secrets injectés via SOPS / environnement)
     POSTGRES_USER: str = "resilience_user"
-    POSTGRES_PASSWORD: str = "resilience_pass"
+    POSTGRES_PASSWORD: str
     POSTGRES_HOST: str = "postgres"
     POSTGRES_PORT: int = 5432
     POSTGRES_DB: str = "resilience_db"
