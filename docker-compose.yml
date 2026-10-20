@@ -527,5 +527,3 @@ networks:
     ipam:
       config:
         - subnet: 10.77.50.0/24
-  resilience-net:
-    driver: bridge
