@@ -27,7 +27,7 @@ x-placeholder: &placeholder
     PYTHONDONTWRITEBYTECODE: "1"
     PYTHONUNBUFFERED: "1"
   volumes:
-    - ./infra/placeholders/placeholder.py:/app/placeholder.py:ro
+    - ./infra/placeholders:/app:ro
   command: ["python", "/app/placeholder.py"]
   healthcheck:
     # wget plutôt que python, beaucoup moins coûteux en CPU
@@ -48,10 +48,12 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Erreur mot de passe requis depuis .env chiffré SOPS}
       POSTGRES_DB: ${POSTGRES_DB:-resilience_db}
       REMEDIATION_DB_PASSWORD: ${REMEDIATION_DB_PASSWORD:?REMEDIATION_DB_PASSWORD manquant dans .env}
+    # pas de port publié : la base n'est joignable que par payment-api et remediation (réseau data)
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./database/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
-      - ./infra/postgres/02-remediation-role.sh:/docker-entrypoint-initdb.d/02-remediation-role.sh:ro
+      # dossiers montés (pas de fichiers seuls) : un fichier remplacé par git casserait le montage au redémarrage
+      - ./database:/database:ro
+      - ./infra/postgres:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
@@ -82,6 +84,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-resilience_db}
       ENVIRONMENT: production
       MOCK_LATENCY_MS: ${MOCK_LATENCY_MS:-20}
+      # jeton exigé par /waf/block et /waf/unblock (sinon la valeur par défaut du code, publique, s'applique)
+      REMEDIATION_TOKEN: ${REMEDIATION_TOKEN:?REMEDIATION_TOKEN manquant dans .env}
       CHAOS_MODE_ENABLED: ${CHAOS_MODE_ENABLED:-false}
     depends_on:
       postgres:
@@ -102,24 +106,13 @@ services:
     environment:
       <<: *placeholder-env
       SERVICE_NAME: auth
-      OWNER: Antoine
+      OWNER: équipe Dev
       PORT: "8001"
     networks:
       app: { ipv4_address: 10.77.20.13 }
 
-  frontend:
-    <<: *placeholder
-    container_name: resilience-frontend
-    environment:
-      <<: *placeholder-env
-      SERVICE_NAME: frontend
-      OWNER: Antoine
-      PORT: "3000"
-    networks:
-      app: { ipv4_address: 10.77.20.11 }
-
   # --- point d'entrée ---
-  # waf temporaire : simple reverse proxy nginx, sans règles. Remplacé par le WAF de Clara.
+  # waf : reverse proxy nginx avec la liste blanche des routes (à remplacer par le WAF définitif)
   waf:
     <<: *defaults
     image: nginxinc/nginx-unprivileged:1.28.0-alpine
@@ -129,7 +122,7 @@ services:
     tmpfs:
       - /tmp
     volumes:
-      - ./infra/placeholders/waf/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./infra/placeholders/waf:/etc/nginx/conf.d:ro
       - waf-blocklist:/etc/nginx/blocklist:ro
     ports:
       # 8082 car 8080 (Oracle) et 8081 (Apache) sont déjà pris sur le PC hôte
@@ -160,7 +153,7 @@ services:
       TARGET_URL: http://waf:8080/api/pay
       INTERVAL_S: ${TRAFFIC_INTERVAL_S:-2}
     volumes:
-      - ./infra/traffic-gen/traffic_gen.py:/app/traffic_gen.py:ro
+      - ./infra/traffic-gen:/app:ro
     command: ["python", "/app/traffic_gen.py"]
     depends_on:
       waf:
@@ -189,7 +182,7 @@ services:
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=3d
     volumes:
-      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/prometheus:/etc/prometheus:ro
       - prometheus-data:/prometheus
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9090/-/healthy || exit 1"]
@@ -205,6 +198,59 @@ services:
     networks:
       app: { ipv4_address: 10.77.20.30 }
       monitoring: { ipv4_address: 10.77.40.30 }
+
+  # service IA (détection Isolation Forest + assistant RAG). Réseau edge pour joindre Ollama (sortie autorisée),
+  # aucun accès aux réseaux de la remédiation. Port 8001 publié uniquement sur le PC hôte (127.0.0.1), pas sur le Wi-Fi.
+  ai-api:
+    <<: *defaults
+    build:
+      context: ./backend-ia
+      dockerfile: Dockerfile
+    image: resilience/ai-api:1.0
+    container_name: resilience-ai-api
+    environment:
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:1.5b}
+      - TRAFFIC_BASELINE_FILE=/data/traffic_baseline.csv
+    ports:
+      - "127.0.0.1:8001:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    volumes:
+      - ./backend-ia:/data:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 1024M
+    networks:
+      edge: { ipv4_address: 10.77.10.41 }
+
+  # frontend : accessible uniquement à travers le waf (http://localhost:8082/)
+  frontend:
+    <<: *defaults
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: resilience/frontend:1.0
+    container_name: resilience-frontend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      app: { ipv4_address: 10.77.20.11 }
 
   grafana:
     <<: *defaults
@@ -249,7 +295,7 @@ services:
     cap_drop: [ALL]
     command: ["-config.file=/etc/loki/loki-config.yml"]
     volumes:
-      - ./infra/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - ./infra/loki:/etc/loki:ro
       - loki-data:/loki
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3100/ready || exit 1"]
@@ -268,7 +314,7 @@ services:
     cap_drop: [ALL]
     command: ["-config.file=/etc/promtail/promtail-config.yml"]
     volumes:
-      - ./infra/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - ./infra/promtail:/etc/promtail:ro
       - promtail-positions:/var/lib/promtail
     depends_on:
       loki:
@@ -324,7 +370,7 @@ services:
       COMPOSE_PROJECT: cybersecu-workshop-2026-2027
       PORT: "9105"
     volumes:
-      - ./infra/docker-stats-exporter/exporter.py:/app/exporter.py:ro
+      - ./infra/docker-stats-exporter:/app:ro
     command: ["python", "/app/exporter.py"]
     depends_on:
       socket-proxy-ro:
@@ -373,13 +419,13 @@ services:
     environment:
       <<: *placeholder-env
       SERVICE_NAME: ml-detector
-      OWNER: Agathe
+      OWNER: équipe IA
       PORT: "8010"
     networks:
       monitoring: { ipv4_address: 10.77.40.40 }
 
   # moteur de remédiation : pour l'instant le placeholder, mais déjà avec Ansible et tout son environnement.
-  # Antoine remplace la commande par son moteur (image construite à partir de resilience/ansible-runner).
+  # le vrai moteur remplacera la commande (image construite à partir de resilience/ansible-runner).
   remediation:
     <<: *placeholder
     build: ./infra/ansible-runner
@@ -390,7 +436,7 @@ services:
     environment:
       <<: *placeholder-env
       SERVICE_NAME: remediation
-      OWNER: Antoine
+      OWNER: équipe Dev
       PORT: "8020"
       DOCKER_API_URL: http://socket-proxy-remed:2375
       WAF_URL: http://waf:8080
@@ -399,9 +445,10 @@ services:
       PGPORT: "5432"
       PGDATABASE: ${POSTGRES_DB:-resilience_db}
       PGUSER: remediation_ro
+      REMEDIATION_TOKEN: ${REMEDIATION_TOKEN:?REMEDIATION_TOKEN manquant dans .env}
       PGPASSWORD: ${REMEDIATION_DB_PASSWORD:?REMEDIATION_DB_PASSWORD manquant dans .env}
     volumes:
-      - ./infra/placeholders/placeholder.py:/app/placeholder.py:ro
+      - ./infra/placeholders:/app:ro
       - ./ansible:/ansible:ro
       - waf-blocklist:/blocklist
     networks:

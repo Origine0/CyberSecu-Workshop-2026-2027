@@ -32,12 +32,12 @@ except OSError: print('bloqué')"
 echo "== Ports publiés sur le PC hôte"
 publies=$(docker compose -p "$PROJET" ps --format '{{.Service}} {{.Ports}}' | grep -o '^[a-z-]* .*0\.0\.0\.0' | cut -d' ' -f1 | sort | tr '\n' ' ')
 attendu "services publiés" "$publies" "grafana waf "
-for p in 5432 8000 9090 3100 2375; do
+for p in 5432 5433 8000 9090 3100 2375; do
   nc -z -w 2 localhost "$p" 2>/dev/null && ko "port $p ouvert sur l'hôte" || ok "port $p fermé sur l'hôte"
 done
 
 echo "== WAF et Grafana"
-for chemin in /api/docs /api/openapi.json /api/metrics; do
+for chemin in /api/docs /api/openapi.json /api/metrics /api/waf/block /api/waf/unblock; do
   attendu "WAF $chemin" "$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$WAF_PORT$chemin")" 403
 done
 attendu "Grafana sans mot de passe" "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/dashboards/uid/resilience-infra)" 401
@@ -49,7 +49,18 @@ attendu "ml-detector -> postgres"           "$(tcp ml-detector postgres 5432)" b
 attendu "ml-detector -> socket-proxy-remed" "$(tcp ml-detector socket-proxy-remed 2375)" bloqué
 attendu "payment-api -> loki"               "$(tcp payment-api loki 3100)" bloqué
 attendu "remediation -> Ollama (.60)"       "$(tcp remediation 192.168.137.60 11434)" bloqué
+attendu "ai-api (RAG) -> remediation"     "$(tcp ai-api remediation 8020)" bloqué
+attendu "ai-api (RAG) -> socket-proxy-remed" "$(tcp ai-api socket-proxy-remed 2375)" bloqué
+attendu "ai-api (RAG) -> postgres"        "$(tcp ai-api postgres 5432)" bloqué
 attendu "remediation -> Internet"           "$(tcp remediation 1.1.1.1 443)" bloqué
+
+echo "== Routes d'administration du WAF de l'API (jeton obligatoire)"
+attendu "/waf/block sans jeton"           "$(http remediation POST 'http://payment-api:8000/waf/block?ip=192.0.2.1&duration=1')" 401
+code=$(docker run --rm --network "container:resilience-remediation" "$PY" python -c "
+import urllib.request as u
+try: print(u.urlopen(u.Request('http://payment-api:8000/waf/block?ip=192.0.2.1&duration=1', method='POST', data=b'', headers={'X-Remediation-Token': 'resilience-remediation-secret'}), timeout=5).status)
+except u.HTTPError as e: print(e.code)")
+attendu "/waf/block avec le jeton par défaut du code" "$code" 401
 
 echo "== Compte Postgres de la remédiation (lecture seule)"
 pg() { docker compose -p "$PROJET" exec -T remediation psql -X -A -t -c "set default_transaction_read_only = off" -c "$1" 2>&1 | tail -1; }

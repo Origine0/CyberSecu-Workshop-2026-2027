@@ -1,5 +1,5 @@
 # Image de base du moteur de remédiation : Python + Ansible + client PostgreSQL.
-# Antoine construit son moteur à partir de celle-ci (FROM resilience/ansible-runner:1.0).
+# Le moteur de remédiation est construit à partir de celle-ci (FROM resilience/ansible-runner:1.0).
 FROM python:3.12.11-alpine3.22
 
 RUN apk add --no-cache postgresql16-client \

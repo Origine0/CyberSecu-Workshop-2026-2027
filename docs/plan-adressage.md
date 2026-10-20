@@ -93,6 +93,9 @@ Tant que ce n'est pas validé, on reste sur `0.0.0.0`.
 bannir tout le monde. À tester dès le premier `up` : `curl` depuis le PC Attaquant, puis lire l'IP dans les logs
 du WAF. Si l'IP réelle n'apparaît pas, le confinement se fera par signature et par limitation de débit, pas par IP.
 
+Publié sur le PC Hôte uniquement (`127.0.0.1`, invisible depuis le Wi-Fi) : `ai-api` sur 8001, appelé par le
+navigateur du dashboard (zone 3) affiché sur le PC Hôte.
+
 Jamais publiés : Postgres (5432), API (8000), Prometheus (9090), Loki (3100), remediation, ml-detector,
 socket-proxy. Ces services n'ont aucune directive `ports:` dans le compose.
 
@@ -121,7 +124,8 @@ test de port TCP (§ 1).
 | Service | Port conteneur | Publié ? | Consommé par |
 |---|---|---|---|
 | `waf` | 8080 | oui → hôte 8082 | Navigateurs du Wi-Fi |
-| `frontend` | 3000 | non | `waf` |
+| `frontend` (Antoine) | 3000 | non | `waf` |
+| `ai-api` (Agathe) | 8000 | 127.0.0.1:8001 seulement | navigateur du PC Hôte (zone 3 du dashboard) |
 | `traffic-gen` | — (client uniquement) | non | — (il appelle `waf:8080`) |
 | `payment-api` | 8000 | non | `waf`, `prometheus` (`/metrics`) |
 | `auth` | 8001 | non | `waf`, `payment-api` |
@@ -148,7 +152,7 @@ On utilise la plage `10.77.0.0/16` pour éviter deux conflits :
 
 | Réseau | Sous-réseau | `internal` | Membres | Rôle |
 |---|---|---|---|---|
-| `edge` | `10.77.10.0/24` | non | waf, grafana | Seul réseau relié à l'extérieur, nécessaire pour publier un port |
+| `edge` | `10.77.10.0/24` | non | waf, grafana, ai-api | Seul réseau relié à l'extérieur, nécessaire pour publier un port |
 | `app` | `10.77.20.0/24` | oui | waf, frontend, payment-api, auth, prometheus, traffic-gen, remediation | Trafic applicatif derrière le WAF |
 | `data` | `10.77.30.0/24` | oui | payment-api, postgres, remediation | L'API écrit, la remédiation lit (compte `remediation_ro`) |
 | `monitoring` | `10.77.40.0/24` | oui | prometheus, grafana, loki, promtail, cadvisor, docker-stats-exporter, ml-detector, socket-proxy-ro, remediation | Collecte et lecture des métriques et des logs ; ml-detector y prévient remediation |
@@ -172,6 +176,7 @@ immédiatement dans les logs. Le `.1` de chaque sous-réseau est réservé à la
 |---|---|---|
 | waf | `.10` | 10.77.10.10, 10.77.20.10 |
 | frontend | `.11` | 10.77.20.11 |
+| ai-api | `.41` | 10.77.10.41 |
 | traffic-gen | `.14` | 10.77.20.14 |
 | payment-api | `.12` | 10.77.20.12, 10.77.30.12 |
 | auth | `.13` | 10.77.20.13 |
@@ -218,6 +223,7 @@ aucun réseau, soit parce que le réseau est `internal`.
 | F16 | traffic-gen | waf | 8080 | Trafic normal : un `POST /api/pay` toutes les 2 s, par le même chemin qu'un vrai client |
 | F17 | remediation | waf | 8080 | Paiement de test après une action de remédiation, par le chemin d'un vrai client |
 | F18 | remediation | postgres | 5432 | Contrôle d'intégrité et preuve de reprise, compte `remediation_ro` en lecture seule (deux tables) |
+| F19 | ai-api | Ollama (PC Hôte ou PC IA `.60`) | 11434 | Assistant RAG : seul service à sortir vers Ollama, par le réseau `edge` |
 
 ### Flux interdits
 
@@ -246,6 +252,8 @@ Une amélioration possible serait d'isoler `socket-proxy-ro` sur un réseau déd
 ## 6. Séparation RAG / LLM et remédiation
 
 - Ollama tourne sur le PC d'Agathe (`192.168.137.60:11434`), en dehors de la plateforme Docker.
+- `ai-api` (détection + RAG d'Agathe) est sur `edge`, le seul réseau avec une sortie : il peut joindre Ollama, mais il n'est
+  sur aucun réseau de la remédiation et ne peut joindre ni le moteur ni les proxys Docker.
 - remediation et ml-detector ne peuvent pas joindre `192.168.137.60`, car ils n'ont que des réseaux internes.
   Seuls `waf` et `grafana`, sur `edge`, ont une route sortante. Ils ne parlent ni à remediation ni au proxy qui redémarre les conteneurs.
 - L'assistant RAG ne déclenche jamais de remédiation. S'il a besoin de contexte (métriques, logs), il passe par
