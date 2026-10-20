@@ -218,20 +218,42 @@ vector_db = None
 qa_chain = None
 
 def init_vector_store():
-    """Charge procedures.pdf, calcule les embeddings CPU et instancie la base FAISS."""
+    """Charge procedures.pdf et les dossiers markdown de gouvernance, calcule les embeddings CPU et instancie la base FAISS."""
     global vector_db, qa_chain
+    documents = []
+
+    # 1. Chargement du PDF s'il existe
     if os.path.exists(PROCEDURES_FILE):
         try:
             logger.info(f"Chargement de la documentation : {PROCEDURES_FILE}...")
             loader = PyPDFLoader(PROCEDURES_FILE)
-            documents = loader.load()
+            documents.extend(loader.load())
+        except Exception as e:
+            logger.error(f"Erreur lors du chargement de {PROCEDURES_FILE}: {e}")
 
+    # 2. Chargement des documents Markdown de gouvernance (BIA, EBIOS RM, DORA, Architecture)
+    knowledge_dir = os.path.join(os.path.dirname(__file__), "knowledge")
+    if os.path.exists(knowledge_dir):
+        from langchain_core.documents import Document
+        for fname in sorted(os.listdir(knowledge_dir)):
+            if fname.endswith(".md"):
+                fpath = os.path.join(knowledge_dir, fname)
+                try:
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    documents.append(Document(page_content=content, metadata={"source": fname}))
+                    logger.info(f"Document gouvernance chargé pour RAG : {fname}")
+                except Exception as e:
+                    logger.error(f"Erreur lors de la lecture de {fname}: {e}")
+
+    if documents:
+        try:
             text_splitter = RecursiveCharacterTextSplitter(
                 chunk_size=500,
                 chunk_overlap=50
             )
             chunks = text_splitter.split_documents(documents)
-            logger.info(f"{len(chunks)} chunks extraits du PDF.")
+            logger.info(f"{len(chunks)} chunks extraits pour le RAG.")
 
             embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
             vector_db = FAISS.from_documents(chunks, embeddings)
@@ -242,11 +264,11 @@ def init_vector_store():
                 retriever=vector_db.as_retriever(search_kwargs={"k": 3}),
                 chain_type_kwargs={"prompt": qa_prompt}
             )
-            logger.info("Base vectorielle FAISS et chaîne RAG initialisées avec succès.")
+            logger.info("Base vectorielle FAISS et chaîne RAG initialisées avec succès avec la gouvernance.")
         except Exception as e:
-            logger.error(f"Erreur lors du chargement de FAISS / HuggingFace: {e}")
+            logger.error(f"Erreur lors de l'initialisation FAISS / HuggingFace: {e}")
     else:
-        logger.warning(f"Fichier {PROCEDURES_FILE} introuvable à la racine. Le RAG est en attente d'indexation.")
+        logger.warning("Aucun document trouvé pour le RAG.")
 
 init_vector_store()
 
