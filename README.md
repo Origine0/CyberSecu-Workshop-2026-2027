@@ -38,6 +38,13 @@ WORKSHOP_2026_2027/
 │       ├── schemas.py              # Schémas Pydantic (validation entrées/sorties)
 │       └── services.py             # Logique métier, idempotence & simulation bancaire
 │
+├── backend-ia/                     # Pilier IA & Cyber-SOC (Détection ML & RAG)
+│   ├── Dockerfile                  # Image CPU optimisée (torch CPU, FAISS libgomp)
+│   ├── requirements.txt            # FastAPI, Scikit-Learn, LangChain, FAISS-cpu
+│   ├── api.py                      # Détection d\'anomalies (Isolation Forest) & RAG (Ollama)
+│   ├── procedures.pdf              # Corpus documentaire de sécurité indexé
+│   └── README.md
+│
 └── frontend/                       # Application Next.js (App Router + Tailwind CSS)
     ├── app/
     │   ├── layout.tsx              # Thème sombre & typographie Geist
@@ -50,7 +57,19 @@ WORKSHOP_2026_2027/
 
 ## 🚀 Démarrage Rapide
 
-### 1. Lancement de l'Infrastructure Conteneurisée (PostgreSQL & FastAPI)
+### 1. Déchiffrement des Secrets (SOPS + age)
+
+Les secrets de configuration du projet sont chiffrés avec SOPS et la clé `age`. Pour générer le fichier local `.env` :
+
+```bash
+# Déchiffrement direct :
+sops -d .env.enc > .env
+
+# Ou via le script d'automatisation :
+./scripts/decrypt_secrets.sh
+```
+
+### 2. Lancement de l'Infrastructure Conteneurisée (PostgreSQL & FastAPI)
 
 Depuis la racine du projet :
 ```bash
