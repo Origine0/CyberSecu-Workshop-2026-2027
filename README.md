@@ -112,16 +112,18 @@ Dans un terminal dédié :
 cd frontend
 npm run dev
 ```
-Accéder au tableau de bord sur [http://localhost:3000](http://localhost:3000).
+L'adresse de l'API se règle avec la variable `NEXT_PUBLIC_API_URL` (par défaut `http://localhost:8000`) ou depuis le bouton ⚙️ du dashboard.
 
-### Les 4 Zones du Dashboard :
-* **Zone 1 (Haut-Gauche) : Santé de l'Infrastructure & Microservices**
-  * Statut en temps réel de FastAPI, PostgreSQL 16, WAF et Loki. Bouton d'interrogation active de `/health`.
-* **Zone 2 (Haut-Droite) : Flux Métier & Transactions en Direct**
-  * Formulaire d'injection de transaction `/pay` en direct (montant, mode nominal ou défaillance forcée).
-  * Fil d'eau des transactions en temps réel avec références uniques, montants et temps de réponse (ms).
-* **Zone 3 (Bas-Gauche) : Détection d'Anomalies IA & Cyber SOC**
-  * Visualisation de l'état du modèle de détection ML AIOps (Isolation Forest), score d'anomalie, et statut de l'assistant local RAG (Ollama).
-* **Zone 4 (Bas-Droite) : Moteur de Remédiation Autonome (Zero-Touch Recovery)**
-  * Cycle en 4 étapes de reprise automatique (Détection → Arbitrage Ansible → Remédiation conteneur → Vérification par nouvelle transaction `/pay`).
-  * Indicateur dédié au format **Clip Chrono 60 secondes**.
+Deux pages, conformément à l'architecture (`docs/architecture.md`) :
+* **[http://localhost:3000](http://localhost:3000)** : page client « Resilience Pay » (choisir un article et payer).
+* **[http://localhost:3000/dashboard](http://localhost:3000/dashboard)** : dashboard de supervision, destiné à rester en local (le WAF bloquera `/dashboard` depuis le réseau).
+
+### Les 5 Zones du Dashboard :
+* **Bandeau d'état** : une mascotte résume l'état de la plateforme. Le bouton « Lancer la démo » raconte un scénario d'attaque de l'EBIOS (🌊 flood = ER1, 🔑 force brute = ER3) : seule la vérification finale fait un vrai paiement, le reste est une simulation pédagogique.
+* **Zone 1 : Santé** : état réel de l'API et de la base (`/health`), et les 13 conteneurs du schéma d'architecture regroupés par bloc (gris = pas encore branché).
+* **Zone 2 : Paiements** : paiement test `/pay` (normal ou panne simulée) et fil des dernières transactions lues dans la base (`/transactions`).
+* **Zone 3 : Détecteur IA** : score d'anomalie (Isolation Forest), branché plus tard sur le resilience-engine.
+* **Zone 4 : Réparation auto** : les 4 étapes Détecter → Décider → Réparer → Vérifier, avec les flux du schéma, le Clip Chrono (60 s) et l'objectif de reprise (RTO).
+* **Zone 5 : Risques EBIOS RM** : les 7 événements redoutés, leur gravité et leur protection (`docs/ebios-rm.md`).
+
+Les données d'architecture et de risques affichées viennent d'un seul fichier : `frontend/app/_lib/architecture.ts`.
