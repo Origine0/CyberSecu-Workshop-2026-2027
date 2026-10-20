@@ -32,6 +32,13 @@ WORKSHOP_2026_2027/
 │       ├── schemas.py              # Schémas Pydantic (validation entrées/sorties)
 │       └── services.py             # Logique métier, idempotence & simulation bancaire
 │
+├── backend-ia/                     # Pilier IA & Cyber-SOC (Détection ML & RAG)
+│   ├── Dockerfile                  # Image CPU optimisée (torch CPU, FAISS libgomp)
+│   ├── requirements.txt            # FastAPI, Scikit-Learn, LangChain, FAISS-cpu
+│   ├── api.py                      # Détection d\'anomalies (Isolation Forest) & RAG (Ollama)
+│   ├── procedures.pdf              # Corpus documentaire de sécurité indexé
+│   └── README.md
+│
 └── frontend/                       # Application Next.js (App Router + Tailwind CSS)
     ├── app/
     │   ├── layout.tsx              # Thème sombre & typographie Geist

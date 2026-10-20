@@ -1,0 +1,24 @@
+# ==============================================================================
+# PROJECT RESILIENCE-ALPHA - Dépendances Python (M2 Cyber & Data)
+# ==============================================================================
+# Exclusion explicite de chromadb (évite les échecs de compilation C++ sous Windows/Docker)
+# Exclusion de torch GPU (pré-installé en version CPU dans le Dockerfile)
+
+# API Framework
+fastapi>=0.110.0,<1.0.0
+uvicorn[standard]>=0.28.0,<1.0.0
+pydantic>=2.6.0,<3.0.0
+
+# Machine Learning & Data Processing
+pandas>=2.2.0,<3.0.0
+scikit-learn>=1.4.0,<2.0.0
+numpy>=1.26.0,<2.0.0
+
+# LangChain & Vector Store (FAISS CPU)
+langchain>=0.2.0,<0.3.0
+langchain-community>=0.2.0,<0.3.0
+langchain-huggingface>=0.0.3,<0.1.0
+langchain-text-splitters>=0.2.0,<0.3.0
+faiss-cpu>=1.8.0
+sentence-transformers>=2.6.0
+pypdf>=4.1.0
