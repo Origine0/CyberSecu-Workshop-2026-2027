@@ -41,6 +41,8 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+from app.waf import WAFMiddleware, waf_state
+
 # Configuration CORS pour autoriser le Dashboard
 app.add_middleware(
     CORSMiddleware,
@@ -49,6 +51,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Activation du Pare-Feu Applicatif (WAF) & Rate Limiting
+app.add_middleware(WAFMiddleware)
 
 # Instrumentation Prometheus pour l'Axe 2 (Observabilité Prometheus/Grafana)
 instrumentator = Instrumentator().instrument(app)
@@ -248,3 +253,57 @@ async def list_recent_transactions(
         }
         for tx in txs
     ]
+
+
+# ==============================================================================
+# ROUTES PARE-FEU APPLICATIF (WAF) & REMÉDIATION AUTONOME (AXE 1 & AXE 4)
+# ==============================================================================
+
+@app.get(
+    "/waf/status",
+    summary="Consulter l'état du WAF et les métriques de blocage",
+    tags=["WAF & Remediation"]
+)
+async def get_waf_status():
+    """Fournit les statistiques de menaces bloquées et les adresses IP bannies au SOC / Dashboard."""
+    return {
+        "banned_ips": list(waf_state.banned_ips.keys()),
+        "stats": waf_state.stats
+    }
+
+
+@app.post(
+    "/waf/block",
+    summary="Bannir une adresse IP malveillante (Trigger Remédiation)",
+    tags=["WAF & Remediation"]
+)
+async def block_ip(
+    ip: str = Query(..., description="Adresse IP hostile à neutraliser"),
+    duration: int = Query(default=60, description="Durée du bannissement en secondes")
+):
+    """Point d'entrée de remédiation autonome (Axe 1) : neutralise une IP attaquante."""
+    waf_state.ban_ip(ip, duration_seconds=duration, reason="AUTONOMOUS_REMEDIATION")
+    return {
+        "status": "SUCCESS",
+        "action": "IP_BANNED",
+        "ip": ip,
+        "duration_seconds": duration
+    }
+
+
+@app.post(
+    "/waf/unblock",
+    summary="Réhabiliter une adresse IP",
+    tags=["WAF & Remediation"]
+)
+async def unblock_ip(
+    ip: str = Query(..., description="Adresse IP à réhabiliter")
+):
+    """Lève le bannissement d'une adresse IP."""
+    waf_state.unban_ip(ip)
+    return {
+        "status": "SUCCESS",
+        "action": "IP_UNBANNED",
+        "ip": ip
+    }
+
