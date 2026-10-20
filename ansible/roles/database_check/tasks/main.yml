@@ -1,0 +1,31 @@
+# Contrôle d'intégrité avec le compte remediation_ro (lecture seule).
+# Connexion via les variables PGHOST, PGUSER, PGDATABASE, PGPASSWORD du conteneur remediation.
+- name: Lancer les contrôles d'intégrité
+  ansible.builtin.command:
+    argv: [psql, -X, -A, -t, -v, ON_ERROR_STOP=1, -c, "{{ item.sql }}"]
+  loop:
+    - name: contrainte solde positif présente
+      sql: "SELECT count(*) FROM pg_constraint WHERE conrelid = 'accounts'::regclass AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%balance >= %'"
+      expected: "1"
+    - name: unicité des clés d'idempotence présente
+      sql: "SELECT count(*) FROM pg_constraint WHERE conrelid = 'transactions'::regclass AND contype = 'u' AND pg_get_constraintdef(oid) LIKE '%idempotency_key%'"
+      expected: "1"
+    - name: comptes à solde négatif
+      sql: "SELECT count(*) FROM accounts WHERE balance < 0"
+      expected: "0"
+    - name: clés d'idempotence en double
+      sql: "SELECT count(*) FROM (SELECT idempotency_key FROM transactions WHERE idempotency_key IS NOT NULL GROUP BY 1 HAVING count(*) > 1) d"
+      expected: "0"
+  loop_control:
+    label: "{{ item.name }}"
+  register: integrity
+  changed_when: false
+
+- name: Vérifier les résultats
+  ansible.builtin.assert:
+    that: item.stdout | trim == item.item.expected
+    fail_msg: "Intégrité KO : {{ item.item.name }} = {{ item.stdout | trim }} (attendu {{ item.item.expected }})"
+    success_msg: "{{ item.item.name }} : OK"
+  loop: "{{ integrity.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"

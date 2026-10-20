@@ -1,0 +1,68 @@
+- name: Vérifier les paramètres
+  ansible.builtin.assert:
+    that:
+      - block_type in ['ip', 'user_agent', 'ratelimit']
+      - state in ['present', 'absent']
+      - block_type == 'ratelimit' or value | default('') | length > 0
+    fail_msg: "Usage : -e block_type=ip|user_agent|ratelimit [-e value=...] [-e state=absent]"
+    quiet: true
+
+# valeurs strictes : elles finissent dans la configuration du WAF
+- name: Vérifier le format de l'IP
+  ansible.builtin.assert:
+    that:
+      - value is match('^\d{1,3}(\.\d{1,3}){3}(/\d{1,2})?$')
+      - value is not match(blocklist_protected_regex)
+    fail_msg: "IP '{{ value }}' refusée : format invalide, ou adresse interne (bloquer 10.77.x bloquerait tous les clients)"
+    quiet: true
+  when: block_type == 'ip'
+
+- name: Vérifier le format du User-Agent
+  ansible.builtin.assert:
+    that:
+      - value is match('^[A-Za-z0-9._/-]{3,40}$')
+      - value is not search('resilience-traffic-gen')
+    fail_msg: "User-Agent '{{ value }}' refusé : 3 à 40 caractères parmi lettres, chiffres, . _ / - (et jamais celui du générateur de trafic)"
+    quiet: true
+  when: block_type == 'user_agent'
+
+- name: Nom du fichier de règle
+  ansible.builtin.set_fact:
+    rule_file: "{{ blocklist_dir }}/{{ block_type }}{{ ('-' ~ value | regex_replace('[^A-Za-z0-9]', '_')) if block_type != 'ratelimit' else '' }}.conf"
+    rule_line: >-
+      {%- if block_type == 'ip' -%}deny {{ value }};
+      {%- elif block_type == 'user_agent' -%}if ($http_user_agent ~* "{{ value }}") { return 403; }
+      {%- else -%}limit_req zone=remediation burst=20 nodelay;
+      {%- endif -%}
+
+- name: Écrire la règle
+  ansible.builtin.copy:
+    dest: "{{ rule_file }}"
+    content: "# block_source.yml {{ now(utc=true).isoformat() }}\n{{ rule_line }}\n"
+    mode: "0644"
+  when: state == 'present'
+
+- name: Retirer la règle
+  ansible.builtin.file:
+    path: "{{ rule_file }}"
+    state: absent
+  when: state == 'absent'
+
+# redémarrage plutôt que signal HUP : le proxy n'autorise pas kill (un conteneur tué ne serait pas relancé)
+- name: Recharger le WAF
+  ansible.builtin.include_role:
+    name: service_restart
+  vars:
+    service: waf
+
+- name: Vérifier que la règle User-Agent est appliquée
+  ansible.builtin.uri:
+    url: "{{ waf_url }}/api/health"
+    headers:
+      User-Agent: "{{ value }}"
+    status_code: "{{ 403 if state == 'present' else 200 }}"
+  register: ua_check
+  until: ua_check.status == (403 if state == 'present' else 200)
+  retries: 5
+  delay: 1
+  when: block_type == 'user_agent'

@@ -1,0 +1,33 @@
+# Les mêmes playbooks tournent sur le PC hôte (make restart) et dans le conteneur remediation.
+# Dans remediation, les variables d'environnement du compose remplacent les valeurs par défaut de l'hôte.
+
+# Accès à l'API Docker : socket locale sur l'hôte, socket-proxy-remed dans le conteneur
+docker_api_url: "{{ lookup('env', 'DOCKER_API_URL') | default('http://localhost', true) }}"
+docker_api_socket: "{{ '' if lookup('env', 'DOCKER_API_URL') else '/var/run/docker.sock' }}"
+container_prefix: resilience-
+
+# Services qu'Ansible a le droit de redémarrer.
+# Exclus volontairement : postgres (données), remediation (lui-même),
+# les socket-proxy (sécurité) et la supervision (garder les traces de l'incident).
+restart_whitelist:
+  - payment-api
+  - auth
+  - frontend
+  - waf
+  - ml-detector
+  - traffic-gen
+
+# Attente de l'état healthy après redémarrage : 30 essais x 2 s
+health_retries: 30
+health_delay: 2
+
+# Vérification finale par une vraie transaction, en passant par le waf
+verify_payment: true
+waf_url: "{{ lookup('env', 'WAF_URL') | default('http://localhost:8082', true) }}"
+verify_payment_url: "{{ waf_url }}/api/pay"
+
+# Liste de blocage lue par le waf (volume waf-blocklist, monté dans remediation)
+blocklist_dir: "{{ lookup('env', 'WAF_BLOCKLIST_DIR') | default('/blocklist', true) }}"
+# Adresses qu'on refuse de bloquer : réseaux Docker (dont la passerelle 10.77.10.1, qui
+# représente tous les clients extérieurs sous Docker Desktop) et localhost
+blocklist_protected_regex: '^(10\.77\.|127\.)'

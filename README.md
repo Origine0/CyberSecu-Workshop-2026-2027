@@ -13,9 +13,15 @@ Ce projet constitue le socle applicatif du démonstrateur de cyber-résilience *
 
 ```text
 WORKSHOP_2026_2027/
-├── docker-compose.yml              # Orchestration Docker (PostgreSQL + FastAPI)
+├── docker-compose.yml              # Stack complète (application, WAF, supervision, remédiation)
 ├── .env.example                    # Variables d'environnement
+├── Makefile                        # Commandes courantes (make help)
 ├── README.md
+│
+├── docs/plan-adressage.md          # IP du labo, ports, réseaux Docker, flux autorisés
+├── infra/                          # Configs Prometheus / Grafana / Loki / promtail, générateur de trafic, exporteur
+├── ansible/                        # Playbooks de remédiation : redémarrage, blocage WAF, contrôle de la base
+├── scripts/                        # chaos.sh et security-check.sh (make chaos, make security-check)
 │
 ├── database/
 │   ├── init.sql                    # Initialisation schéma, tables (merchants, accounts, transactions, audit), index et seeds
@@ -77,9 +83,11 @@ docker compose ps
 
 ### 2. Test des Endpoints FastAPI
 
+L'API n'est plus exposée directement : tout passe par le WAF sur le port 8082.
+
 - **Healthcheck actif :**
   ```bash
-  curl http://localhost:8000/health
+  curl http://localhost:8082/api/health
   ```
   *Réponse attendue (HTTP 200) :*
   ```json
@@ -95,7 +103,7 @@ docker compose ps
 
 - **Paiement transactionnel `/pay` :**
   ```bash
-  curl -X POST http://localhost:8000/pay \
+  curl -X POST http://localhost:8082/api/pay \
     -H "Content-Type: application/json" \
     -d '{
       "merchant_code": "MERCH_ALPHA",
@@ -105,11 +113,85 @@ docker compose ps
     }'
   ```
 
-- **Documentation Swagger interactive :**
-  Ouvrir `http://localhost:8000/docs`
+- **Documentation Swagger :** volontairement bloquée par le WAF (403). Pour la consulter en local :
+  ```bash
+  docker compose exec payment-api curl -s http://localhost:8000/openapi.json
+  ```
 
-- **Métriques Prometheus :**
-  Ouvrir `http://localhost:8000/metrics`
+- **Métriques Prometheus :** collectées en interne par Prometheus, visibles dans Grafana (`http://localhost:3000`).
+
+---
+
+## 🏗️ Infrastructure (docker compose, supervision, Ansible)
+
+Toute la plateforme tourne sur le PC Hôte (Windows + WSL2 + Docker Desktop). Détail des IP, ports, réseaux et flux :
+[`docs/plan-adressage.md`](docs/plan-adressage.md).
+
+### Prérequis
+- Docker Desktop (sous Windows : avec l'intégration WSL activée, et les commandes lancées depuis Ubuntu)
+- `make`, `curl`, `nc` et `python3` sur la machine (Ubuntu : `sudo apt install -y make curl netcat-openbsd python3`).
+  Ansible n'est pas nécessaire sur la machine : il tourne dans le conteneur `remediation`.
+- Environ 3 Go de RAM libres pour Docker.
+
+Vérifier le groupe de la socket Docker, à reporter dans `DOCKER_SOCKET_GID` du `.env` s'il est différent de 1001 :
+```bash
+docker run --rm -v /var/run/docker.sock:/s python:3.12.11-alpine3.22 stat -c %g /s
+```
+Symptôme d'une mauvaise valeur : `socket-proxy-remed` redémarre en boucle avec `permission denied` dans ses logs,
+et la remédiation ne peut plus rien redémarrer.
+
+### Déployer
+```bash
+make env     # crée .env depuis .env.example si besoin (définir GRAFANA_ADMIN_PASSWORD et REMEDIATION_DB_PASSWORD)
+make pull    # télécharge les images, à faire avant la démo (pas d'Internet sur place)
+make up      # démarre toute la stack
+```
+
+### Vérifier
+```bash
+make ps      # état des services (tous doivent être healthy)
+make check   # config, santé, API via le WAF, /api/docs bloqué, ports internes fermés, syntaxe Ansible
+make security-check   # exposition réseau, isolation entre conteneurs, droits des proxys Docker et du compte Postgres
+```
+
+| Accès | URL |
+|---|---|
+| Plateforme (WAF) | `http://192.168.137.1:8082` (ou `http://localhost:8082` sur le PC Hôte) |
+| Grafana | `http://192.168.137.1:3000`, compte `admin`, mot de passe dans `.env` |
+
+Le tableau de bord « Resilience-Alpha - Infra » est chargé automatiquement dans Grafana (dossier RESILIENCE-ALPHA).
+
+Seuls le WAF (8082) et Grafana (3000) sont publiés. Postgres, l'API, Prometheus, Loki et la remédiation ne sont
+joignables qu'à l'intérieur des réseaux Docker.
+
+### Relancer un service
+```bash
+make restart SERVICE=payment-api
+```
+Le playbook Ansible vérifie que le service est dans la liste blanche (`ansible/group_vars/all.yml`), le redémarre, attend
+qu'il soit healthy, puis envoie un paiement de test qui doit revenir en `SUCCESS`. `postgres`, les socket-proxy, la
+remédiation et la supervision sont exclus de la liste.
+
+### Remédiation et chaos
+Les playbooks de remédiation tournent dans le conteneur `remediation`, avec les mêmes droits que le futur moteur
+(accès Docker limité à lister et redémarrer, compte Postgres en lecture seule) :
+```bash
+make block TYPE=user_agent VALUE=sqlmap     # confinement dans le WAF (TYPE : ip, user_agent, ratelimit)
+make unblock TYPE=user_agent VALUE=sqlmap   # retire la règle
+make block-test                             # vérifie que le WAF applique la liste de blocage
+make restore                                # contrôle d'intégrité de la base, redémarrage de l'API, preuve de reprise
+make chaos SERVICE=payment-api PANNE=20     # panne simulée puis réparation, avec mesure du temps de reprise
+```
+
+### Services provisoires
+`auth`, `frontend`, `ml-detector`, `remediation` et `waf` tournent pour l'instant avec des conteneurs temporaires
+(`infra/placeholders/`) qui seront remplacés par les vrais services, sous le même nom et sur le même port.
+Le conteneur `remediation` utilise déjà l'image `resilience/ansible-runner` (`infra/ansible-runner/`), base du futur moteur.
+
+### Arrêter
+```bash
+make down    # arrête la stack, les volumes (base, métriques, logs) sont conservés
+```
 
 ---
 
@@ -129,9 +211,10 @@ Les 3 requêtes CTE prévues :
 Dans un terminal dédié :
 ```bash
 cd frontend
-npm run dev
+npm run dev -- -p 3001
 ```
-Accéder au tableau de bord sur [http://localhost:3000](http://localhost:3000).
+Accéder au tableau de bord sur [http://localhost:3001](http://localhost:3001) (le port 3000 est pris par Grafana).
+Dans le champ « URL de l'API » du dashboard, indiquer `http://localhost:8082/api`.
 
 ### Les 4 Zones du Dashboard :
 * **Zone 1 (Haut-Gauche) : Santé de l'Infrastructure & Microservices**

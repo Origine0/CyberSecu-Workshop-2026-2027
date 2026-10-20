@@ -1,0 +1,31 @@
+# « Preuve de reprise » : requête CTE d'Antoine (database/queries_analytics.sql, requête 3).
+# Compare la disponibilité avant l'incident, pendant, et dans les 2 dernières minutes.
+- name: Calculer la preuve de reprise
+  ansible.builtin.command:
+    argv:
+      - psql
+      - -X
+      - -v
+      - ON_ERROR_STOP=1
+      - -c
+      - >-
+        WITH RecoveryPeriods AS (
+          SELECT CASE
+                   WHEN created_at >= NOW() - INTERVAL '2 minutes' THEN 'POST_REMEDIATION'
+                   WHEN created_at >= NOW() - INTERVAL '7 minutes' THEN 'INCIDENT_WINDOW'
+                   ELSE 'PRE_INCIDENT'
+                 END AS period, status, latency_ms
+          FROM transactions WHERE created_at >= NOW() - INTERVAL '15 minutes'
+        )
+        SELECT period, count(*) AS total_tx,
+               count(*) FILTER (WHERE status = 'SUCCESS') AS success_tx,
+               round(100.0 * count(*) FILTER (WHERE status = 'SUCCESS') / count(*), 1) AS disponibilite_pct,
+               round(avg(latency_ms), 1) AS latence_moy_ms
+        FROM RecoveryPeriods GROUP BY period
+        ORDER BY CASE period WHEN 'PRE_INCIDENT' THEN 1 WHEN 'INCIDENT_WINDOW' THEN 2 ELSE 3 END
+  register: proof
+  changed_when: false
+
+- name: Afficher la preuve de reprise
+  ansible.builtin.debug:
+    msg: "{{ proof.stdout_lines }}"
