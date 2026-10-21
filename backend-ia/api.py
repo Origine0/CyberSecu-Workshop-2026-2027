@@ -191,6 +191,7 @@ RAG_SYSTEM_PROMPT = """Tu es l'assistant documentaire cyber de PROJECT RESILIENC
 RÈGLE ABSOLUE DE SÉCURITÉ : Ton rôle est STRICTEMENT ANALYTIQUE ET CONSULTATIF. Tu n'as STRICTEMENT AUCUN DROIT DE REMÉDIATION ni d'exécution de commande.
 Tu ne dois jamais exécuter, ordonner ou simuler d'action technique autonome sur l'infrastructure.
 Réponds exclusivement à partir des procédures fournies dans le contexte ci-dessous.
+Réponds de manière concise, percutante et claire (en 2 à 3 phrases maximum) pour permettre une synthèse vocale fluide à l'opérateur.
 Si une procédure de remédiation est demandée, détaille les consignes documentées pour l'opérateur humain tout en rappelant que tu n'exécutes aucune action directe.
 Si l'information demandée n'est pas présente dans le document, indique simplement que la documentation disponible ne contient pas cette information.
 
@@ -200,18 +201,21 @@ Extrait des procédures de sécurité :
 Question de l'opérateur :
 {question}
 
-Réponse consultative :"""
+Réponse consultative concise :"""
 
 qa_prompt = PromptTemplate(
     template=RAG_SYSTEM_PROMPT,
     input_variables=["context", "question"]
 )
 
-# Initialisation du LLM Ollama
+# Initialisation du LLM Ollama avec limitation stricte pour fluidité vocale (réponse < 5 secondes)
 llm = Ollama(
     base_url=OLLAMA_BASE_URL,
     model=OLLAMA_MODEL,
-    temperature=0.1
+    temperature=0.1,
+    num_predict=85,
+    stop=["\n\n\n", "Question de l'opérateur", "RÈGLE ABSOLUE", "Extrait des"],
+    timeout=40.0
 )
 
 vector_db = None

@@ -1,4 +1,10 @@
-import type { Transaction, HealthCheckResponse, WafStatusResponse } from '../types/index.ts';
+import type { 
+  Transaction, 
+  HealthCheckResponse, 
+  WafStatusResponse,
+  AiAnalyzeResponse,
+  AiAskResponse
+} from '../types/index.ts';
 import { INITIAL_MERCHANTS } from './paymentEngine.ts';
 
 // URLs relatives : en conteneur le WAF route /api, /auth et /ai ; en `npm run dev` local, le proxy Vite fait pareil.
@@ -214,5 +220,33 @@ export async function fetchTransactions(limit = 35): Promise<Transaction[]> {
 export async function fetchWafStatus(): Promise<WafStatusResponse> {
   return request<WafStatusResponse>(`${API_BASE}/waf/status`, {
     signal: AbortSignal.timeout(2500),
+  });
+}
+
+
+/**
+ * Analyse télémétrique temps réel par le modèle Isolation Forest (/ai/analyze)
+ */
+export async function analyzeTelemetry(payload: {
+  timestamp: string;
+  request_rate: number;
+  error_rate: number;
+  latency_ms: number;
+}): Promise<AiAnalyzeResponse> {
+  return request<AiAnalyzeResponse>(`${AI_BASE}/analyze`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(4000),
+  });
+}
+
+/**
+ * Interroge l'assistant RAG (FAISS + Ollama) sur les procédures cyber (/ai/ask)
+ */
+export async function askRag(query: string): Promise<AiAskResponse> {
+  return request<AiAskResponse>(`${AI_BASE}/ask`, {
+    method: 'POST',
+    body: JSON.stringify({ query }),
+    signal: AbortSignal.timeout(45000),
   });
 }
