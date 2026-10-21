@@ -45,6 +45,9 @@ export const Dashboard4Zones: React.FC<Dashboard4ZonesProps> = ({
   const totalBlocked = wafStatus?.stats.total_blocked ?? 0;
   const rateLimitDrops = wafStatus?.stats.rate_limit_drops ?? 0;
   const bannedIps = wafStatus?.banned_ips ?? [];
+  const remediationStatus = wafStatus?.remediation?.status ?? 'UP';
+  const remediationQueue = wafStatus?.remediation?.queue ?? 0;
+  const recentActions = wafStatus?.remediation?.recent_actions ?? [];
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
@@ -326,11 +329,19 @@ export const Dashboard4Zones: React.FC<Dashboard4ZonesProps> = ({
             ) : (
               <div className="space-y-2.5">
                 <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-50/80 border border-zinc-100 text-xs">
-                  <span className="font-medium text-zinc-900">Moteur Zero-Touch</span>
+                  <span className="font-medium text-zinc-900">Moteur Zero-Touch (engine.py)</span>
                   <span className={`font-semibold ${
-                    isDegraded ? 'text-amber-600 animate-pulse' : 'text-emerald-600'
+                    isDegraded || remediationQueue > 0
+                      ? 'text-amber-600 animate-pulse'
+                      : remediationStatus === 'UP'
+                      ? 'text-emerald-600'
+                      : 'text-zinc-500'
                   }`}>
-                    {isDegraded ? 'Reprise autonome engagée' : 'Veille active (Nominal)'}
+                    {remediationQueue > 0
+                      ? `Playbook en cours (file: ${remediationQueue})`
+                      : isDegraded
+                      ? 'Reprise autonome engagée'
+                      : `Veille active (${remediationStatus})`}
                   </span>
                 </div>
 
@@ -341,22 +352,56 @@ export const Dashboard4Zones: React.FC<Dashboard4ZonesProps> = ({
                   </span>
                 </div>
 
-                <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-50/80 border border-zinc-100 text-xs">
-                  <span className="font-medium text-zinc-900">Blacklist dynamique (/waf/status)</span>
-                  <span className="font-mono text-[11px] text-zinc-600 truncate max-w-[180px]">
-                    {bannedIps.length > 0 ? bannedIps.join(', ') : 'Aucune restriction active'}
-                  </span>
-                </div>
+                {/* Historique temps réel des playbooks Ansible exécutés par remediation:8020 */}
+                <div className="p-3 rounded-xl bg-zinc-50/80 border border-zinc-100 text-xs space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-zinc-900">Playbooks Ansible exécutés</span>
+                    <span className="text-[10px] font-mono text-zinc-500">
+                      {recentActions.length} exécution(s)
+                    </span>
+                  </div>
 
-                <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-50/80 border border-zinc-100 text-xs">
-                  <span className="font-medium text-zinc-900">Playbooks Ansible (RTO &lt; 15s)</span>
-                  <span className="text-zinc-500">block_source • restart • restore_db</span>
+                  {recentActions.length === 0 ? (
+                    <div className="text-[11px] text-zinc-400 pt-0.5">
+                      Aucun playbook déclenché • Prêts : <span className="font-mono">block_source</span>, <span className="font-mono">restart_service</span>, <span className="font-mono">restore_database</span>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5 pt-1">
+                      {recentActions.slice(0, 3).map((act, idx) => (
+                        <div
+                          key={`${act.alert_id}-${act.action}-${idx}`}
+                          className="flex items-center justify-between bg-white px-2.5 py-1.5 rounded-lg border border-zinc-200/70 text-[11px]"
+                        >
+                          <div className="truncate max-w-[210px]">
+                            <span className="font-mono font-semibold text-zinc-900">
+                              {act.action}.yml
+                            </span>
+                            <span className="text-zinc-400 ml-1.5">
+                              ({act.type} → {act.service})
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="text-zinc-500 font-mono">{act.duration_s}s</span>
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                act.result === 'success'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-rose-100 text-rose-800'
+                              }`}
+                            >
+                              {act.result === 'success' ? 'OK' : 'ERR'}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
           </div>
           <div className="pt-3 mt-4 border-t border-zinc-100 flex justify-between text-xs text-zinc-400">
-            <span>Zéro intervention humaine</span>
+            <span>Zéro intervention humaine (ml-detector → Ansible)</span>
             <span>RPO : 0 perte (ACID)</span>
           </div>
         </div>

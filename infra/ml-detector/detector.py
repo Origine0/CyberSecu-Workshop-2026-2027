@@ -35,7 +35,7 @@ TOKEN = os.environ.get("REMEDIATION_TOKEN", "")
 INTERVAL_S = float(os.environ.get("INTERVAL_S", "5"))
 WINDOW_S = int(os.environ.get("WINDOW_S", "30"))
 CONFIRMATIONS = int(os.environ.get("CONFIRMATIONS", "2"))  # anomalies consécutives avant d'alerter
-WARMUP_S = int(os.environ.get("WARMUP_S", "90"))  # pas d'alerte juste après un démarrage de la stack
+WARMUP_S = int(os.environ.get("WARMUP_S", "25"))  # pas d'alerte juste après un démarrage de la stack
 FORBIDDEN_MIN = int(os.environ.get("FORBIDDEN_MIN", "3"))  # refus 403 sans signature avant de parler d'intrusion
 STARTED = time.time()
 PORT = int(os.environ.get("PORT", "8010"))
@@ -134,9 +134,9 @@ def diagnose(waf):
         ip = Counter(g[0] for g in suspicious).most_common(1)[0][0]
         return {"type": "intrusion", "service": "payment-api", "source_ip": ip,
                 "user_agent": tools.most_common(1)[0][0] if tools else ""}
-    # flood : la majorité des erreurs sont des refus de limitation de débit (429 par l'API, 503 par le WAF)
+    # flood / fuzzing : la majorité des erreurs sont des refus de limitation de débit (429/503) ou de validation (422)
     errors = [g for g in waf if int(g[3]) >= 400]
-    throttled = [g for g in errors if g[3] in ("429", "503")]
+    throttled = [g for g in errors if g[3] in ("429", "503", "422")]
     if errors and len(throttled) * 2 >= len(errors):
         top_ip = Counter(g[0] for g in throttled).most_common(1)
         return {"type": "dos", "service": "payment-api", "source_ip": top_ip[0][0]}
