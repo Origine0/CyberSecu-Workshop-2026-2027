@@ -121,7 +121,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "round(sum(increase(ml_alerts_sent_total[1h])))",
+          "expr": "round(sum(increase(ml_alerts_sent_total[1h]))) or vector(0)",
           "legendFormat": "",
           "instant": true,
           "queryType": "instant"
