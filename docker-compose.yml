@@ -167,9 +167,12 @@ services:
     cap_drop: [ALL]
     tmpfs:
       - /tmp
+    # recharge nginx quand la liste de blocage change, sans redémarrer le conteneur (infra/waf-reload)
+    entrypoint: ["/bin/sh", "-c", "sh /reload/reload-on-change.sh & exec /docker-entrypoint.sh nginx -g 'daemon off;'"]
     volumes:
       - ./infra/placeholders/waf:/etc/nginx/conf.d:ro
       - waf-blocklist:/etc/nginx/blocklist:ro
+      - ./infra/waf-reload:/reload:ro
     ports:
       # 8082 car 8080 (Oracle) et 8081 (Apache) sont déjà pris sur le PC hôte
       - "${PUBLISH_IP:-0.0.0.0}:${WAF_PORT:-8082}:8080"

@@ -37,6 +37,7 @@ WINDOW_S = int(os.environ.get("WINDOW_S", "30"))
 CONFIRMATIONS = int(os.environ.get("CONFIRMATIONS", "2"))  # anomalies consécutives avant d'alerter
 WARMUP_S = int(os.environ.get("WARMUP_S", "90"))  # pas d'alerte juste après un démarrage de la stack
 FORBIDDEN_MIN = int(os.environ.get("FORBIDDEN_MIN", "3"))  # refus 403 sans signature avant de parler d'intrusion
+FLOOD_RPS = float(os.environ.get("FLOOD_RPS", "3"))  # paiements par seconde d'un même client (un utilisateur en fait moins de 0,1)
 STARTED = time.time()
 PORT = int(os.environ.get("PORT", "8010"))
 HEARTBEAT = "/tmp/ml-detector.heartbeat"
@@ -134,7 +135,11 @@ def diagnose(waf):
         ip = Counter(g[0] for g in suspicious).most_common(1)[0][0]
         return {"type": "intrusion", "service": "payment-api", "source_ip": ip,
                 "user_agent": tools.most_common(1)[0][0] if tools else ""}
-    # flood : la majorité des erreurs sont des refus de limitation de débit (429 par l'API, 503 par le WAF)
+    # flood : un même client envoie bien plus de paiements qu'un utilisateur, même si l'API ne les refuse pas encore
+    payments = Counter(g[0] for g in waf if g[1] == "POST" and g[2].startswith("/api/pay"))
+    if payments and payments.most_common(1)[0][1] >= FLOOD_RPS * WINDOW_S:
+        return {"type": "dos", "service": "payment-api", "source_ip": payments.most_common(1)[0][0]}
+    # ou la majorité des erreurs sont des refus de limitation de débit (429 par l'API, 503 par le WAF)
     errors = [g for g in waf if int(g[3]) >= 400]
     throttled = [g for g in errors if g[3] in ("429", "503")]
     if errors and len(throttled) * 2 >= len(errors):
