@@ -45,7 +45,7 @@ export const AiCyberSocPanel: React.FC<AiCyberSocPanelProps> = ({
   transactions = [],
   wafStatus,
 }) => {
-  const [aiEndpoint] = useState<string>('http://localhost:8001');
+  const [aiEndpoint] = useState<string>('/ai');
   const [isAiOnline, setIsAiOnline] = useState<boolean | null>(null);
 
   // Hook de synthèse vocale et d'effets sonores

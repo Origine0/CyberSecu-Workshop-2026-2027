@@ -51,6 +51,16 @@ export interface HealthCheckResponse {
   };
 }
 
+export interface RemediationAction {
+  ts: number;
+  alert_id: string;
+  type: 'crash' | 'dos' | 'intrusion' | string;
+  service: string;
+  action: 'block_source' | 'restart_service' | 'restore_database' | string;
+  result: 'success' | 'failure' | string;
+  duration_s: number;
+}
+
 export interface WafStatusResponse {
   banned_ips: string[];
   stats: {
@@ -58,6 +68,11 @@ export interface WafStatusResponse {
     banned_ip_drops: number;
     fuzzing_drops: number;
     total_blocked: number;
+  };
+  remediation?: {
+    status: string;
+    queue: number;
+    recent_actions: RemediationAction[];
   };
 }
 

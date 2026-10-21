@@ -99,7 +99,7 @@ export default function App() {
         setWafStatus(wafRes);
         const deltaBlocked = wafRes.stats.total_blocked - prevBlockedRef.current;
         prevBlockedRef.current = wafRes.stats.total_blocked;
-        wafActiveAttack = deltaBlocked > 0;
+        wafActiveAttack = deltaBlocked > 0 || (wafRes.remediation?.queue ?? 0) > 0;
       }
 
       const healthDown = healthRes.status !== 'healthy' || healthRes.database.status !== 'connected';
