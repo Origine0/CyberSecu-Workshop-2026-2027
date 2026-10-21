@@ -284,7 +284,7 @@ async def verify_remediation_token(
 ):
     """Contrôle d'accès strict (Cyber-Résilience) : Seul le moteur de remédiation ou un admin autorisé
     peut modifier dynamiquement la liste de blocage du WAF."""
-    expected_token = getattr(settings, "REMEDIATION_TOKEN", "resilience-remediation-secret")
+    expected_token = settings.REMEDIATION_TOKEN
     provided_token = x_remediation_token
     if not provided_token and authorization:
         if authorization.startswith("Bearer "):

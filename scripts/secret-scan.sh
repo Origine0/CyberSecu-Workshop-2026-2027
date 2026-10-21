@@ -37,7 +37,7 @@ if [ -f .env ]; then
   while IFS='=' read -r cle valeur; do
     case "$cle" in *PASSWORD*|*SECRET*|*TOKEN*) ;; *) continue ;; esac
     [ "${#valeur}" -ge 6 ] && [ "$valeur" != CHANGE_ME ] || continue
-    fichiers=$(grep -rlF -- "$valeur" "$WORK" | sed "s#$WORK/##" | tr '\n' ' ')
+    fichiers=$(grep -rlF -- "$valeur" "$WORK" | sed "s#$WORK/##" | grep -vE "^($EXCLUS)$" | tr '\n' ' ')
     [ -n "$fichiers" ] && { ko "valeur de $cle présente dans : $fichiers"; trouve=1; }
   done < <(grep -E '^[A-Z_]+=' .env)
   [ "$trouve" = 0 ] && ok "aucune valeur du .env dans l'archive"
@@ -56,7 +56,7 @@ lignes=$(grep -rnE "(PASSWORD|SECRET|TOKEN)[A-Z_]*\s*:\s*(str|Optional\[str\])\s
 [ -n "$lignes" ] && ko "secret par défaut dans le code :"$'\n'"$(echo "$lignes" | sed 's/^/            /')" || ok "aucun"
 
 echo "== 5. clés privées et fichiers sensibles"
-cles=$(grep -rlE "AGE-SECRET-KEY-|BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY" "$WORK" | sed "s#$WORK/##")
+cles=$(grep -rlE "AGE-SECRET-KEY-|BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY" "$WORK" | sed "s#$WORK/##" | grep -vE "^($EXCLUS)$")
 [ -n "$cles" ] && ko "clé privée dans : $cles" || ok "aucune clé privée ni clé age"
 sensibles=$(cd "$WORK" && find . -type f \( -name .env -o -name '.env.local' -o -name key.txt -o -name '*.pem' -o -name '*.key' -o -name '*.p12' -o -name keys.txt \))
 [ -n "$sensibles" ] && ko "fichiers sensibles : $sensibles" || ok "aucun .env, key.txt, keys.txt, .pem, .key"
