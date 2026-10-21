@@ -52,9 +52,9 @@ export const AiCyberSocPanel: React.FC<AiCyberSocPanelProps> = ({ isDegraded = f
     action_required: 'NONE',
     anomaly_score: 0.1678,
     metrics_received: {
-      request_rate: 50.0,
-      error_rate: 0.012,
-      latency_ms: 118.0
+      request_rate: 0.50,
+      error_rate: 0.005,
+      latency_ms: 28.0
     }
   });
 
@@ -122,13 +122,13 @@ export const AiCyberSocPanel: React.FC<AiCyberSocPanelProps> = ({ isDegraded = f
   const applyPreset = (type: 'nominal' | 'attack' | 'failure') => {
     soundFx.playScanPing(isMuted);
     if (type === 'nominal') {
-      setRequestRate(50.0);
-      setErrorRate(0.012);
-      setLatencyMs(118.0);
+      setRequestRate(0.50);
+      setErrorRate(0.005);
+      setLatencyMs(28.0);
     } else if (type === 'attack') {
-      setRequestRate(850.0);
+      setRequestRate(32.0);
       setErrorRate(0.48);
-      setLatencyMs(2450.0);
+      setLatencyMs(650.0);
     } else if (type === 'failure') {
       setRequestRate(65.0);
       setErrorRate(0.85);
@@ -164,7 +164,7 @@ export const AiCyberSocPanel: React.FC<AiCyberSocPanelProps> = ({ isDegraded = f
       }
     } catch {
       // Inférence locale miroir si conteneur non joignable (garantie zéro panne en soutenance)
-      const isOutlier = payload.request_rate > 150 || payload.error_rate > 0.05 || payload.latency_ms > 300;
+      const isOutlier = payload.request_rate > 2.5 || payload.error_rate > 0.05 || payload.latency_ms > 70.0;
       setMlResult({
         timestamp: new Date().toISOString(),
         is_anomaly: isOutlier,
@@ -179,25 +179,25 @@ export const AiCyberSocPanel: React.FC<AiCyberSocPanelProps> = ({ isDegraded = f
 
   // Déclenchement en 1 clic d'une attaque simulée
   const handleQuickAttack = () => {
-    setRequestRate(920.0);
+    setRequestRate(35.0);
     setErrorRate(0.55);
-    setLatencyMs(2800.0);
+    setLatencyMs(750.0);
     handleAnalyze({
-      request_rate: 920.0,
+      request_rate: 35.0,
       error_rate: 0.55,
-      latency_ms: 2800.0
+      latency_ms: 750.0
     });
   };
 
   // Rétablissement en 1 clic du trafic nominal
   const handleQuickRestore = () => {
-    setRequestRate(50.0);
-    setErrorRate(0.012);
-    setLatencyMs(118.0);
+    setRequestRate(0.50);
+    setErrorRate(0.005);
+    setLatencyMs(28.0);
     handleAnalyze({
-      request_rate: 50.0,
-      error_rate: 0.012,
-      latency_ms: 118.0
+      request_rate: 0.50,
+      error_rate: 0.005,
+      latency_ms: 28.0
     });
   };
 
@@ -346,9 +346,7 @@ export const AiCyberSocPanel: React.FC<AiCyberSocPanelProps> = ({ isDegraded = f
             <label className="text-[10px] text-zinc-500 block truncate">Débit ({requestRate} req/s)</label>
             <input 
               type="range" 
-              min="10" 
-              max="1000" 
-              step="10"
+              min="0.1" max="60" step="0.1"
               value={requestRate} 
               onChange={(e) => setRequestRate(parseFloat(e.target.value))}
               className="w-full accent-zinc-900 cursor-pointer h-1"
@@ -370,9 +368,7 @@ export const AiCyberSocPanel: React.FC<AiCyberSocPanelProps> = ({ isDegraded = f
             <label className="text-[10px] text-zinc-500 block truncate">Latence ({Math.round(latencyMs)} ms)</label>
             <input 
               type="range" 
-              min="50" 
-              max="3000" 
-              step="50"
+              min="10" max="1500" step="10"
               value={latencyMs} 
               onChange={(e) => setLatencyMs(parseFloat(e.target.value))}
               className="w-full accent-zinc-900 cursor-pointer h-1"

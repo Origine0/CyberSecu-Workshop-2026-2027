@@ -255,7 +255,19 @@ def init_vector_store():
             chunks = text_splitter.split_documents(documents)
             logger.info(f"{len(chunks)} chunks extraits pour le RAG.")
 
-            embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+            # Mode 100% Hors-Ligne : Chargement local prioritaire sans requête Internet
+            local_model_path = os.path.join(os.path.dirname(__file__), "models", "all-MiniLM-L6-v2")
+            if os.path.exists(local_model_path):
+                logger.info(f"Chargement embeddings 100% HORS-LIGNE depuis : {local_model_path}")
+                embeddings = HuggingFaceEmbeddings(
+                    model_name=local_model_path,
+                    model_kwargs={"device": "cpu", "local_files_only": True},
+                    encode_kwargs={"normalize_embeddings": True}
+                )
+            else:
+                logger.info("Chargement standard all-MiniLM-L6-v2")
+                embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+
             vector_db = FAISS.from_documents(chunks, embeddings)
 
             qa_chain = RetrievalQA.from_chain_type(
@@ -276,10 +288,10 @@ init_vector_store()
 # SCHÉMAS PYDANTIC (ENTRÉES / SORTIES)
 # ==============================================================================
 class MetricPayload(BaseModel):
-    timestamp: str = Field(..., example="2026-10-20T10:00:00Z")
-    request_rate: float = Field(..., ge=0.0, description="Requêtes par seconde", example=52.5)
-    error_rate: float = Field(..., ge=0.0, le=1.0, description="Taux d'erreurs HTTP (0.0 à 1.0)", example=0.015)
-    latency_ms: float = Field(..., ge=0.0, description="Latence moyenne en ms", example=118.0)
+    timestamp: str = Field(..., example="2026-10-21T10:00:00Z")
+    request_rate: float = Field(..., ge=0.0, description="Requêtes par seconde (Nominal opérationnel: 0.50 req/s)", example=0.50)
+    error_rate: float = Field(..., ge=0.0, le=1.0, description="Taux d'erreurs HTTP (0.0 à 1.0)", example=0.005)
+    latency_ms: float = Field(..., ge=0.0, description="Latence moyenne en ms", example=28.0)
 
 class AnalysisResponse(BaseModel):
     timestamp: str
