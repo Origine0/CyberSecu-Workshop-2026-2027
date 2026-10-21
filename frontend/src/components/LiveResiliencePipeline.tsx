@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   CreditCard, 
   Terminal, 
@@ -8,16 +8,15 @@ import {
   Activity, 
   Play, 
   Check, 
-  AlertTriangle,
-  ArrowRight,
-  Info
+  ArrowRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Transaction, HealthCheckResponse } from '../types/index.ts';
+import { Transaction, HealthCheckResponse, WafStatusResponse } from '../types/index.ts';
 
 interface LiveResiliencePipelineProps {
   transactions: Transaction[];
   health: HealthCheckResponse;
+  wafStatus?: WafStatusResponse;
   isDegraded: boolean;
   onSimulateTransit?: () => void;
 }
@@ -37,58 +36,73 @@ interface PipelineNode {
 export const LiveResiliencePipeline: React.FC<LiveResiliencePipelineProps> = ({
   transactions,
   health,
+  wafStatus,
   isDegraded,
 }) => {
   const [activeStep, setActiveStep] = useState<number | null>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
-  const [pulseCount, setPulseCount] = useState(0);
+  const lastTxIdRef = useRef<string | undefined>(transactions[0]?.id);
 
-  // Trigger automated visual transit every few seconds or on manual click
+  // Trigger automated visual transit when a new live transaction arrives or on manual click
   const triggerTransit = () => {
-    setPulseCount((prev) => prev + 1);
     setActiveStep(0);
-    setTimeout(() => setActiveStep(1), 350);
-    setTimeout(() => setActiveStep(2), 700);
-    setTimeout(() => setActiveStep(3), 1050);
-    setTimeout(() => setActiveStep(4), 1400);
-    setTimeout(() => setActiveStep(null), 2000);
+    setTimeout(() => setActiveStep(1), 300);
+    setTimeout(() => setActiveStep(2), 600);
+    setTimeout(() => setActiveStep(3), 900);
+    setTimeout(() => setActiveStep(4), 1200);
+    setTimeout(() => setActiveStep(null), 1700);
   };
 
+  useEffect(() => {
+    const newestId = transactions[0]?.id;
+    if (newestId && newestId !== lastTxIdRef.current) {
+      lastTxIdRef.current = newestId;
+      triggerTransit();
+    }
+  }, [transactions]);
+
   const latestTx = transactions[0];
+  const totalBlocked = wafStatus?.stats.total_blocked ?? 0;
+  const bannedCount = wafStatus?.banned_ips.length ?? 0;
 
   const nodes: PipelineNode[] = [
     {
       id: 'node-client',
       zone: 'Zone 1 · Métier',
-      label: 'Client Web',
-      sublabel: 'Paiement / Next.js',
+      label: 'Client & Traffic-Gen',
+      sublabel: 'Frontal React / Flux API',
       icon: CreditCard,
       status: 'nominal',
       metric: `${transactions.length} tx`,
       detail: latestTx ? `${latestTx.amount.toFixed(2)} € (${latestTx.customer_name})` : 'Prêt',
-      tech: 'React 19 • Next.js 15',
+      tech: 'React 19 • Tailwind CSS',
     },
     {
       id: 'node-fastapi',
       zone: 'Zone 2 · Infra',
       label: 'Passerelle FastAPI',
-      sublabel: 'Route POST /pay',
+      sublabel: 'Route POST /api/pay',
       icon: Terminal,
       status: isDegraded ? 'warning' : 'nominal',
       metric: `${health.database.latency_ms} ms`,
-      detail: isDegraded ? 'Latence accrue • Fallback actif' : 'Validation Pydantic • Idempotence',
-      tech: 'Python 3.11 • Uvicorn',
+      detail: isDegraded ? 'Anomalie détectée • Protection engagée' : 'Validation Pydantic • Idempotence',
+      tech: 'Python 3.12 • FastAPI',
     },
     {
       id: 'node-aiops',
       zone: 'Zone 3 · Sécurité',
       label: 'WAF & AIOps',
-      sublabel: 'Isolation Forest',
+      sublabel: 'Isolation Forest + WAF',
       icon: ShieldCheck,
-      status: isDegraded ? 'warning' : 'nominal',
-      metric: isDegraded ? 'Score 0.84' : 'Score 0.02',
-      detail: isDegraded ? 'Anomalie détectée sur le débit' : 'Signature SHA-256 certifiée',
-      tech: 'Scikit-learn • Modèle ML',
+      status: isDegraded || totalBlocked > 0 ? 'warning' : 'nominal',
+      metric: totalBlocked > 0 ? `${totalBlocked} bloqués` : isDegraded ? 'Anomalie ML' : 'Nominal',
+      detail:
+        totalBlocked > 0
+          ? `${totalBlocked} requêtes neutralisées (${bannedCount} IP bannie)`
+          : isDegraded
+          ? 'Anomalie détectée sur le débit / taux d’erreur'
+          : 'Inspection L7 & Modèle Isolation Forest actifs',
+      tech: 'Nginx • Scikit-Learn • Ollama RAG',
     },
     {
       id: 'node-db',
@@ -96,9 +110,9 @@ export const LiveResiliencePipeline: React.FC<LiveResiliencePipelineProps> = ({
       label: 'PostgreSQL 16',
       sublabel: 'Persistance ACID',
       icon: Database,
-      status: 'nominal',
+      status: health.database.status === 'connected' ? 'nominal' : 'warning',
       metric: `${health.database.active_connections} connexions`,
-      detail: 'Table transactions & CTEs analytiques',
+      detail: 'Table transactions, comptes & audit logs',
       tech: 'Postgres 16-alpine • Docker',
     },
     {
@@ -109,8 +123,8 @@ export const LiveResiliencePipeline: React.FC<LiveResiliencePipelineProps> = ({
       icon: Cpu,
       status: isDegraded ? 'active' : 'nominal',
       metric: isDegraded ? 'Reprise...' : 'Veille',
-      detail: isDegraded ? 'Playbook Ansible engagé (RTO < 15s)' : 'Surveillance continue 24/7',
-      tech: 'Ansible • Circuit Breaker',
+      detail: isDegraded ? 'Playbook Ansible & Blacklist WAF engagés (RTO < 15s)' : 'Surveillance continue 24/7',
+      tech: 'Ansible • Socket Proxy',
     },
   ];
 
@@ -129,8 +143,14 @@ export const LiveResiliencePipeline: React.FC<LiveResiliencePipelineProps> = ({
               <h2 className="text-sm font-semibold tracking-tight text-zinc-950">
                 Pipeline Graphique de Résilience
               </h2>
-              <span className="text-[11px] font-normal px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60">
-                {isDegraded ? 'Incident sous contrôle' : 'Flux nominal'}
+              <span
+                className={`text-[11px] font-normal px-2 py-0.5 rounded-full border ${
+                  isDegraded
+                    ? 'bg-amber-50 text-amber-800 border-amber-200/80 animate-pulse'
+                    : 'bg-emerald-50 text-emerald-700 border-emerald-200/60'
+                }`}
+              >
+                {isDegraded ? 'Incident sous contrôle (Zero-Touch)' : 'Flux nominal'}
               </span>
             </div>
             <p className="text-xs text-zinc-400 mt-0.5 font-normal">
@@ -151,7 +171,7 @@ export const LiveResiliencePipeline: React.FC<LiveResiliencePipelineProps> = ({
         </div>
       </div>
 
-      {/* Visual Topology Pipeline (Apple-style clean vector pipeline) */}
+      {/* Visual Topology Pipeline */}
       <div className="py-8 relative overflow-x-auto scrollbar-none">
         <div className="min-w-[680px] max-w-4xl mx-auto px-2 relative">
           
@@ -163,7 +183,7 @@ export const LiveResiliencePipeline: React.FC<LiveResiliencePipelineProps> = ({
                 <motion.div
                   initial={{ left: '0%' }}
                   animate={{ left: `${(activeStep / 4) * 100}%` }}
-                  transition={{ duration: 0.35, ease: 'easeInOut' }}
+                  transition={{ duration: 0.3, ease: 'easeInOut' }}
                   className="absolute top-1/2 -translate-y-1/2 w-4 h-4 -ml-2 rounded-full bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.7)] flex items-center justify-center z-10"
                 >
                   <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
@@ -279,20 +299,20 @@ export const LiveResiliencePipeline: React.FC<LiveResiliencePipelineProps> = ({
         </div>
       </div>
 
-      {/* Live Waveform & Node Inspector (Minimalist Apple Health style) */}
+      {/* Live Waveform & Node Inspector */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t border-zinc-100">
         
         {/* Real-time Heartbeat / Waveform */}
         <div className="md:col-span-2 p-3.5 rounded-xl bg-zinc-50/70 border border-zinc-100 flex flex-col justify-between">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className={`w-2 h-2 rounded-full animate-pulse ${isDegraded ? 'bg-amber-500' : 'bg-emerald-500'}`} />
               <span className="text-xs font-medium text-zinc-700">
                 Onde de stabilité du système (Heartbeat)
               </span>
             </div>
             <span className="text-xs text-zinc-400 font-normal">
-              {isDegraded ? 'Fluctuation contrôlée' : '99.98% stabilité continue'}
+              {isDegraded ? 'Perturbation détectée · Mitigation en cours' : '99.98% stabilité continue'}
             </span>
           </div>
 

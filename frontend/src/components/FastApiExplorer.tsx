@@ -14,6 +14,7 @@ interface FastApiExplorerProps {
   health: HealthCheckResponse;
   onRefreshHealth: () => void;
   onProcessPayment: (req: PaymentRequest) => { transaction: Transaction; isIdempotent: boolean };
+  onRemotePayment?: (req: PaymentRequest) => Promise<Transaction>;
   isDegraded: boolean;
 }
 
@@ -21,6 +22,7 @@ export const FastApiExplorer: React.FC<FastApiExplorerProps> = ({
   health,
   onRefreshHealth,
   onProcessPayment,
+  onRemotePayment,
   isDegraded,
 }) => {
   const [activeRoute, setActiveRoute] = useState<'health' | 'pay' | 'analyze' | 'ask'>('health');
@@ -46,9 +48,10 @@ export const FastApiExplorer: React.FC<FastApiExplorerProps> = ({
   const [lastRagResponse, setLastRagResponse] = useState<any>(null);
   const [loading, setLoading] = useState(false);
 
-  const handleTestPay = (e: React.FormEvent) => {
+  const handleTestPay = async (e: React.FormEvent) => {
     e.preventDefault();
-    const result = onProcessPayment({
+    setLoading(true);
+    const payload: PaymentRequest = {
       amount: parseFloat(payAmount),
       currency: 'EUR',
       merchant_id: payMerchant,
@@ -58,11 +61,31 @@ export const FastApiExplorer: React.FC<FastApiExplorerProps> = ({
       cvv: payCvv,
       reference: `REQ-${Math.floor(1000 + Math.random() * 9000)}`,
       simulate_failure: isDegraded,
-    });
-    setLastPayResponse({
-      status: result.transaction.status === 'CONFIRMED' ? 201 : 400,
-      transaction: result.transaction,
-    });
+    };
+
+    try {
+      if (onRemotePayment) {
+        const tx = await onRemotePayment(payload);
+        setLastPayResponse({
+          status: tx.status === 'CONFIRMED' ? 201 : 400,
+          endpoint: 'POST /api/pay',
+          transaction: tx,
+        });
+      } else {
+        const result = onProcessPayment(payload);
+        setLastPayResponse({
+          status: result.transaction.status === 'CONFIRMED' ? 201 : 400,
+          transaction: result.transaction,
+        });
+      }
+    } catch (err) {
+      setLastPayResponse({
+        status: 500,
+        error: err instanceof Error ? err.message : 'Erreur lors de la requête /api/pay',
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleTestAnalyze = async (e: React.FormEvent) => {
@@ -76,7 +99,7 @@ export const FastApiExplorer: React.FC<FastApiExplorerProps> = ({
     };
 
     try {
-      const res = await fetch('http://localhost:8001/analyze', {
+      const res = await fetch('/ai/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -104,7 +127,7 @@ export const FastApiExplorer: React.FC<FastApiExplorerProps> = ({
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await fetch('http://localhost:8001/ask', {
+      const res = await fetch('/ai/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: ragQuery }),
@@ -126,19 +149,19 @@ export const FastApiExplorer: React.FC<FastApiExplorerProps> = ({
 
   const getCurlCommand = () => {
     if (activeRoute === 'health') {
-      return `curl -s http://localhost:8000/health`;
+      return `curl -s ${window.location.origin}/api/health`;
     }
     if (activeRoute === 'pay') {
-      return `curl -X POST http://localhost:8000/pay \\
+      return `curl -X POST ${window.location.origin}/api/pay \\
   -H "Content-Type: application/json" \\
   -d '{"merchant_code": "MERCH_ALPHA", "amount": ${payAmount}, "currency": "EUR"}'`;
     }
     if (activeRoute === 'analyze') {
-      return `curl -X POST http://localhost:8001/analyze \\
+      return `curl -X POST ${window.location.origin}/ai/analyze \\
   -H "Content-Type: application/json" \\
   -d '{"timestamp": "${new Date().toISOString()}", "request_rate": ${aiReqRate}, "error_rate": ${aiErrRate}, "latency_ms": ${aiLatency}}'`;
     }
-    return `curl -X POST http://localhost:8001/ask \\
+    return `curl -X POST ${window.location.origin}/ai/ask \\
   -H "Content-Type: application/json" \\
   -d '{"query": "${ragQuery}"}'`;
   };
@@ -158,7 +181,7 @@ export const FastApiExplorer: React.FC<FastApiExplorerProps> = ({
             Console FastAPI
           </h1>
           <p className="text-xs text-zinc-400 mt-1 font-normal">
-            Exécution et test interactif des microservices Métier (:8000) et IA (:8001)
+            Exécution et test interactif des microservices Métier (/api) et IA (/ai)
           </p>
         </div>
 
@@ -235,7 +258,7 @@ export const FastApiExplorer: React.FC<FastApiExplorerProps> = ({
                 className="w-full py-2.5 rounded-xl bg-zinc-950 hover:bg-zinc-800 text-white font-medium text-xs flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer"
               >
                 <Activity className="w-3.5 h-3.5" />
-                <span>Tester la sonde</span>
+                <span>Tester la sonde /api/health</span>
               </button>
             </div>
           )}
@@ -288,10 +311,11 @@ export const FastApiExplorer: React.FC<FastApiExplorerProps> = ({
 
               <button
                 type="submit"
-                className="w-full py-2.5 rounded-xl bg-zinc-950 hover:bg-zinc-800 text-white font-medium text-xs flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                disabled={loading}
+                className="w-full py-2.5 rounded-xl bg-zinc-950 hover:bg-zinc-800 text-white font-medium text-xs flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:opacity-50"
               >
                 <Send className="w-3.5 h-3.5" />
-                <span>Envoyer transaction</span>
+                <span>{loading ? 'Envoi...' : 'Envoyer transaction (/api/pay)'}</span>
               </button>
             </form>
           )}

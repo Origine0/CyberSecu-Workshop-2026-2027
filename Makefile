@@ -4,7 +4,7 @@ COMPOSE := docker compose
 REMED := docker compose exec -T remediation ansible-playbook /ansible/playbooks
 WAF_PORT ?= 8082
 
-.PHONY: help env pull up ps logs check restart chaos security-check block unblock block-test restore down
+.PHONY: help env pull up reload ps logs check restart chaos security-check secret-scan block unblock block-test restore down
 
 help: ## affiche cette aide
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-15s %s\n", $$1, $$2}'
@@ -18,6 +18,9 @@ pull: ## télécharge toutes les images (à faire tant qu'on a Internet)
 
 up: env ## démarre toute la stack
 	$(COMPOSE) up -d
+
+reload: ## après un git pull : recrée les conteneurs (sinon ils gardent les anciens dossiers montés)
+	$(COMPOSE) up -d --force-recreate --wait
 
 ps: ## état des services
 	$(COMPOSE) ps --format 'table {{.Service}}\t{{.Status}}\t{{.Ports}}'
@@ -43,6 +46,9 @@ chaos: ## simule une panne puis la répare : make chaos [SERVICE=payment-api] [P
 
 security-check: ## vérifie l'exposition, l'isolation et les droits des proxys
 	@bash scripts/security-check.sh
+
+secret-scan: ## vérifie qu'aucun secret n'est en clair dans le dépôt (et signale l'historique Git)
+	@bash scripts/secret-scan.sh
 
 block: ## bloque une source dans le WAF : make block TYPE=user_agent VALUE=sqlmap (TYPE : ip, user_agent, ratelimit)
 	$(REMED)/block_source.yml -e block_type=$(TYPE) -e value=$(VALUE)

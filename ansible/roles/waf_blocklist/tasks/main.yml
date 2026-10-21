@@ -48,12 +48,33 @@
     state: absent
   when: state == 'absent'
 
-# redémarrage plutôt que signal HUP : le proxy n'autorise pas kill (un conteneur tué ne serait pas relancé)
-- name: Recharger le WAF
-  ansible.builtin.include_role:
-    name: service_restart
-  vars:
-    service: waf
+# redémarrage plutôt que signal HUP : le proxy n'autorise pas kill (un conteneur tué ne serait pas relancé).
+# Si le WAF ne redémarre pas avec la nouvelle règle (config du WAF incompatible), on retire la règle
+# et on relance le WAF : la remédiation ne doit jamais laisser la plateforme hors service.
+- name: Recharger le WAF (retour arrière automatique en cas d'échec)
+  block:
+    - name: Recharger le WAF
+      ansible.builtin.include_role:
+        name: service_restart
+      vars:
+        service: waf
+        health_retries: 10  # nginx démarre en moins de 2 s : 20 s sans healthy = la règle l'en empêche
+  rescue:
+    - name: Retirer la règle qui empêche le WAF de démarrer
+      ansible.builtin.file:
+        path: "{{ rule_file }}"
+        state: absent
+      when: state == 'present'
+
+    - name: Relancer le WAF sans la règle
+      ansible.builtin.include_role:
+        name: service_restart
+      vars:
+        service: waf
+
+    - name: Signaler l'échec du blocage
+      ansible.builtin.fail:
+        msg: "Le WAF refuse la règle {{ block_type }} : règle retirée, WAF relancé sans elle (vérifier sa configuration)"
 
 - name: Vérifier que la règle User-Agent est appliquée
   ansible.builtin.uri:

@@ -1,7 +1,7 @@
 # Resilience-Alpha - stack complète
 # Réseaux, ports et flux : voir docs/plan-adressage.md
 # Seuls waf (8082) et grafana (3000) sont publiés, tous les réseaux sauf edge sont internes.
-# TODO : mot de passe Postgres de labo en clair, secrets à passer dans Vault avant le rendu.
+# Secrets : fournis par le .env (non versionné), généré depuis secrets.enc.env avec SOPS + age (scripts/decrypt_secrets.sh).
 
 # nom fixé pour garder le même volume pgdata si le dossier change de nom
 name: cybersecu-workshop-2026-2027
@@ -87,6 +87,9 @@ services:
       # jeton exigé par /waf/block et /waf/unblock (sinon la valeur par défaut du code, publique, s'applique)
       REMEDIATION_TOKEN: ${REMEDIATION_TOKEN:?REMEDIATION_TOKEN manquant dans .env}
       CHAOS_MODE_ENABLED: ${CHAOS_MODE_ENABLED:-false}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET manquant dans .env}
+      # false : les paiements anonymes (traffic-gen, carte directe) restent acceptés
+      REQUIRE_AUTH: ${REQUIRE_AUTH:-false}
     depends_on:
       postgres:
         condition: service_healthy
@@ -100,16 +103,59 @@ services:
       app: { ipv4_address: 10.77.20.12 }
       data: { ipv4_address: 10.77.30.12 }
 
+  # service d'authentification et de comptes (JWT, solde) - joint par le waf sur /auth/
   auth:
-    <<: *placeholder
+    <<: *defaults
+    build:
+      context: ./backend-auth
+      dockerfile: Dockerfile
+    image: resilience/auth:1.0.0
     container_name: resilience-auth
+    read_only: true
+    cap_drop: [ALL]
+    tmpfs:
+      - /tmp
     environment:
-      <<: *placeholder-env
-      SERVICE_NAME: auth
-      OWNER: équipe Dev
-      PORT: "8001"
+      POSTGRES_USER: ${POSTGRES_USER:-resilience_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Erreur mot de passe requis depuis .env chiffré SOPS}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:-resilience_db}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET manquant dans .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8001/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
     networks:
       app: { ipv4_address: 10.77.20.13 }
+      data: { ipv4_address: 10.77.30.13 }
+
+  frontend:
+    <<: *defaults
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: resilience/frontend:1.0
+    container_name: resilience-frontend
+    environment:
+      # cibles des proxys Vite (/api, /auth, /ai) : toujours via le WAF
+      VITE_PROXY_TARGET: http://waf:8080
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      app: { ipv4_address: 10.77.20.11 }
 
   # --- point d'entrée ---
   # waf : reverse proxy nginx avec la liste blanche des routes (à remplacer par le WAF définitif)
@@ -229,28 +275,9 @@ services:
         limits:
           cpus: '1.5'
           memory: 1024M
+    # edge uniquement : le waf le joint par ce réseau pour /ai/ ; sur app, le RAG pourrait joindre la remédiation
     networks:
       edge: { ipv4_address: 10.77.10.41 }
-
-  # frontend : accessible uniquement à travers le waf (http://localhost:8082/)
-  frontend:
-    <<: *defaults
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    image: resilience/frontend:1.0
-    container_name: resilience-frontend
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-    networks:
-      app: { ipv4_address: 10.77.20.11 }
 
   grafana:
     <<: *defaults
@@ -413,31 +440,55 @@ services:
       monitoring: { ipv4_address: 10.77.40.60 }
 
   # --- détection / remédiation ---
+  # détection continue : mesure le trafic toutes les 5 s, le fait juger par le modèle Isolation Forest
+  # entraîné dans backend-ia, et prévient le moteur de remédiation en cas d'anomalie (aucune action directe)
   ml-detector:
-    <<: *placeholder
+    <<: *defaults
+    build: ./infra/ml-detector
+    image: resilience/ml-detector:1.0
     container_name: resilience-ml-detector
+    user: "65534:65534"
+    read_only: true
+    cap_drop: [ALL]
+    tmpfs:
+      - /tmp
     environment:
-      <<: *placeholder-env
-      SERVICE_NAME: ml-detector
-      OWNER: équipe IA
-      PORT: "8010"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      MODEL_FILE: /model/isolation_forest_model.joblib
+      REMEDIATION_TOKEN: ${REMEDIATION_TOKEN:?REMEDIATION_TOKEN manquant dans .env}
+    volumes:
+      - ./infra/ml-detector:/app:ro
+      - ./backend-ia:/model:ro
+    command: ["python", "/app/detector.py"]
+    depends_on:
+      loki:
+        condition: service_healthy
+      docker-stats-exporter:
+        condition: service_healthy
+    healthcheck:
+      # healthy si la boucle de détection tourne (heartbeat de moins de 30 s)
+      test: ["CMD-SHELL", "test $$(( $$(date +%s) - $$(stat -c %Y /tmp/ml-detector.heartbeat) )) -lt 30"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
     networks:
       monitoring: { ipv4_address: 10.77.40.40 }
 
-  # moteur de remédiation : pour l'instant le placeholder, mais déjà avec Ansible et tout son environnement.
-  # le vrai moteur remplacera la commande (image construite à partir de resilience/ansible-runner).
+  # moteur de remédiation : reçoit les alertes du détecteur et lance les playbooks de la liste blanche
   remediation:
     <<: *placeholder
     build: ./infra/ansible-runner
     image: resilience/ansible-runner:1.0
     container_name: resilience-remediation
+    command: ["python", "/app/engine.py"]
     tmpfs:
       - /tmp
     environment:
       <<: *placeholder-env
-      SERVICE_NAME: remediation
-      OWNER: équipe Dev
       PORT: "8020"
+      COOLDOWN_S: "90"
       DOCKER_API_URL: http://socket-proxy-remed:2375
       WAF_URL: http://waf:8080
       WAF_BLOCKLIST_DIR: /blocklist
@@ -448,7 +499,7 @@ services:
       REMEDIATION_TOKEN: ${REMEDIATION_TOKEN:?REMEDIATION_TOKEN manquant dans .env}
       PGPASSWORD: ${REMEDIATION_DB_PASSWORD:?REMEDIATION_DB_PASSWORD manquant dans .env}
     volumes:
-      - ./infra/placeholders:/app:ro
+      - ./infra/remediation-engine:/app:ro
       - ./ansible:/ansible:ro
       - waf-blocklist:/blocklist
     networks:
@@ -527,5 +578,3 @@ networks:
     ipam:
       config:
         - subnet: 10.77.50.0/24
-  resilience-net:
-    driver: bridge

@@ -147,6 +147,13 @@ make pull    # télécharge les images, à faire avant la démo (pas d'Internet 
 make up      # démarre toute la stack
 ```
 
+### Après un `git pull`
+```bash
+make reload  # recrée les conteneurs pour qu'ils voient les fichiers et dossiers mis à jour
+```
+Sans cela, un conteneur dont un dossier monté a été remplacé par Git tourne encore, mais ne peut plus redémarrer
+(y compris par la remédiation automatique).
+
 ### Vérifier
 ```bash
 make ps      # état des services (tous doivent être healthy)

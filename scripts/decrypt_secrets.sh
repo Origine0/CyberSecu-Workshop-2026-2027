@@ -8,27 +8,21 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-SECRETS_ENC="${ROOT_DIR}/.env.enc"
-[ ! -f "${SECRETS_ENC}" ] && SECRETS_ENC="${ROOT_DIR}/secrets.enc.env"
+SECRETS_ENC="${ROOT_DIR}/secrets.enc.env"
 ENV_TARGET="${ROOT_DIR}/.env"
 
 echo "🔐 [SOPS] Vérification des prérequis de chiffrement..."
 
 if ! command -v sops &> /dev/null; then
-    echo "❌ Erreur: 'sops' n'est pas installé. Installez-le avec : brew install sops"
+    echo "❌ Erreur: 'sops' n'est pas installé. Installez-le avec : brew install sops (macOS) ou téléchargez le binaire officiel (Linux)."
     exit 1
 fi
 
-if [ -f "${ROOT_DIR}/secrets.enc.env" ]; then
-    SECRETS_ENC="${ROOT_DIR}/secrets.enc.env"
+if [ -f "${SECRETS_ENC}" ]; then
     echo "🔓 [SOPS] Déchiffrement direct de ${SECRETS_ENC} vers .env..."
     sops -d "${SECRETS_ENC}" > "${ENV_TARGET}"
-elif [ -f "${ROOT_DIR}/.env.enc" ]; then
-    SECRETS_ENC="${ROOT_DIR}/.env.enc"
-    echo "🔓 [SOPS] Déchiffrement direct de ${SECRETS_ENC} vers .env..."
-    sops --input-type dotenv -d "${SECRETS_ENC}" > "${ENV_TARGET}"
 else
-    echo "❌ Erreur: Fichier de configuration chiffré introuvable (secrets.enc.env ou .env.enc)"
+    echo "❌ Erreur: Fichier de configuration chiffré introuvable (${SECRETS_ENC})"
     exit 1
 fi
 
