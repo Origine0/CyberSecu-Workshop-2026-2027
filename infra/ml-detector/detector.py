@@ -2,8 +2,8 @@
 Isolation Forest (fichier entraîné dans backend-ia) et prévient le moteur de remédiation en cas d'anomalie.
 
 Mesures (fenêtre WINDOW_S, vues côté client, donc valables même quand l'API est arrêtée) :
-  request_rate : requêtes par seconde reçues par le waf
-  error_rate   : part de réponses en erreur (max entre le waf et le générateur de trafic)
+  request_rate : requêtes par seconde reçues par le waf pour l'API (/api/, /auth/), hors lectures du dashboard
+  error_rate   : part de ces réponses en erreur (max entre le waf et le générateur de trafic)
   latency_ms   : latence moyenne des paiements du générateur de trafic
 Le modèle décide s'il y a anomalie ; la cause (crash, dos, intrusion) sert seulement à choisir la réponse.
 """
@@ -38,6 +38,7 @@ CONFIRMATIONS = int(os.environ.get("CONFIRMATIONS", "2"))  # anomalies consécut
 WARMUP_S = int(os.environ.get("WARMUP_S", "25"))  # pas d'alerte juste après un démarrage de la stack
 FORBIDDEN_MIN = int(os.environ.get("FORBIDDEN_MIN", "3"))  # refus 403 sans signature avant de parler d'intrusion
 FLOOD_RPS = float(os.environ.get("FLOOD_RPS", "3"))  # paiements par seconde d'un même client (un utilisateur en fait moins de 0,1)
+THROTTLED_MIN = int(os.environ.get("THROTTLED_MIN", "10"))  # refus 429/503/422 sur la fenêtre avant de parler de flood
 STARTED = time.time()
 PORT = int(os.environ.get("PORT", "8010"))
 HEARTBEAT = "/tmp/ml-detector.heartbeat"
@@ -45,6 +46,9 @@ HEARTBEAT = "/tmp/ml-detector.heartbeat"
 # services que la remédiation sait redémarrer (même liste blanche que ansible/group_vars/all.yml)
 WATCHED = ["payment-api", "waf", "auth", "frontend", "traffic-gen"]
 SCANNER_UA = re.compile(r"sqlmap|nikto|nmap|gobuster|dirb|dirbuster|wfuzz|hydra|masscan|zgrab|nuclei", re.I)
+# lectures automatiques du dashboard (environ 3 req/s par onglet ouvert) : le modèle a appris l'activité de
+# paiement (0,1 à 2 req/s), pas ces rafraîchissements. Le frontend et l'assistant IA (/ai/) ne comptent pas non plus.
+DASHBOARD_READS = re.compile(r"^/api/(health|transactions|waf/status)(\?|$)")
 ACCESS = re.compile(r'^(\S+) - \S+ \[[^\]]+\] "(\S+) (\S+)[^"]*" (\d{3}) \S+ "[^"]*" "([^"]*)"')
 
 state = {"features": {}, "score": 0.0, "anomaly": False, "streak": 0, "alerts": Counter(), "last": {}}
@@ -94,11 +98,12 @@ def measure():
             traffic.append(json.loads(line))
         except ValueError:
             pass
-    waf_errors = sum(1 for g in waf if int(g[3]) >= 400)
+    api = [g for g in waf if g[2].startswith(("/api/", "/auth/")) and not (g[1] == "GET" and DASHBOARD_READS.match(g[2]))]
+    waf_errors = sum(1 for g in api if int(g[3]) >= 400)
     tg_errors = sum(1 for t in traffic if t.get("tx_status") != "SUCCESS")
     features = {
-        "request_rate": round(len(waf) / WINDOW_S, 3),
-        "error_rate": round(max(waf_errors / len(waf) if waf else 0.0, tg_errors / len(traffic) if traffic else 0.0), 4),
+        "request_rate": round(len(api) / WINDOW_S, 3),
+        "error_rate": round(max(waf_errors / len(api) if api else 0.0, tg_errors / len(traffic) if traffic else 0.0), 4),
         "latency_ms": round(sum(t.get("latency_ms", 0) for t in traffic) / len(traffic), 1) if traffic else 0.0,
     }
     return features, waf
@@ -139,10 +144,11 @@ def diagnose(waf):
     payments = Counter(g[0] for g in waf if g[1] == "POST" and g[2].startswith("/api/pay"))
     if payments and payments.most_common(1)[0][1] >= FLOOD_RPS * WINDOW_S:
         return {"type": "dos", "service": "payment-api", "source_ip": payments.most_common(1)[0][0]}
-    # ou la majorité des erreurs sont des refus de limitation de débit (429 par l'API, 503 par le WAF)
+    # ou la majorité des erreurs sont des refus de limitation de débit (429 par l'API, 503 par le WAF) ou de
+    # validation (422, fuzzing), en nombre suffisant : une saisie invalide isolée n'est pas un flood
     errors = [g for g in waf if int(g[3]) >= 400]
     throttled = [g for g in errors if g[3] in ("429", "503", "422")]
-    if errors and len(throttled) * 2 >= len(errors):
+    if len(throttled) >= THROTTLED_MIN and len(throttled) * 2 >= len(errors):
         top_ip = Counter(g[0] for g in throttled).most_common(1)
         return {"type": "dos", "service": "payment-api", "source_ip": top_ip[0][0]}
     return None

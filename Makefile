@@ -4,7 +4,7 @@ COMPOSE := docker compose
 REMED := docker compose exec -T remediation ansible-playbook /ansible/playbooks
 WAF_PORT ?= 8082
 
-.PHONY: help env pull up reload ps logs check restart chaos security-check secret-scan block unblock block-test restore down
+.PHONY: help env pull up reload ps logs check restart chaos security-check secret-scan demo-ready block unblock block-test restore down
 
 help: ## affiche cette aide
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-15s %s\n", $$1, $$2}'
@@ -49,6 +49,9 @@ security-check: ## vérifie l'exposition, l'isolation et les droits des proxys
 
 secret-scan: ## vérifie qu'aucun secret n'est en clair dans le dépôt (et signale l'historique Git)
 	@bash scripts/secret-scan.sh
+
+demo-ready: ## avant une démo ou une répétition : blocages retirés, moteur remis à zéro, contrôles (sans attaque en cours)
+	@bash scripts/demo-ready.sh
 
 block: ## bloque une source dans le WAF : make block TYPE=user_agent VALUE=sqlmap (TYPE : ip, user_agent, ratelimit)
 	$(REMED)/block_source.yml -e block_type=$(TYPE) -e value=$(VALUE)

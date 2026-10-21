@@ -259,8 +259,16 @@ export default function App() {
   // ==============================================================================
   // 🤖 ROUTE AUTONOME /robot SANS LAYOUT (800x480 HDMI)
   // ==============================================================================
-  if (routeMode === 'robot') {
-    return <RobotDisplayView />;
+  if (isRobot) {
+    return (
+      <RobotDisplayView
+        isDegraded={isDegraded}
+        transactions={transactions}
+        wafStatus={wafStatus}
+        health={health}
+        onToggleDegraded={() => setManualDegraded(!manualDegraded)}
+      />
+    );
   }
 
   // ==============================================================================

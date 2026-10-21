@@ -37,8 +37,11 @@ for p in 5432 5433 8000 9090 3100 2375; do
 done
 
 echo "== WAF et Grafana"
+# depuis le réseau interne app : le détecteur ignore ces requêtes, alors que 5 refus venus de l'extérieur
+# ressemblent à un balayage des routes d'administration (fausse alerte intrusion). Les règles du WAF sont
+# les mêmes quelle que soit la source ; make check teste /api/docs depuis l'hôte.
 for chemin in /api/docs /api/openapi.json /api/metrics /api/waf/block /api/waf/unblock; do
-  attendu "WAF $chemin" "$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$WAF_PORT$chemin")" 403
+  attendu "WAF $chemin" "$(http remediation GET "http://waf:8080$chemin")" 403
 done
 attendu "Grafana sans mot de passe" "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/dashboards/uid/resilience-infra)" 401
 
