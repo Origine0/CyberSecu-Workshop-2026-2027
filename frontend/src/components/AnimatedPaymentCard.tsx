@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Lock, RotateCw, Wifi, Check, ShieldCheck, Sparkles } from 'lucide-react';
+import { Lock, Wifi, Check, ShieldCheck, Sparkles } from 'lucide-react';
 
 interface AnimatedPaymentCardProps {
   cardNumber: string;
@@ -325,22 +325,6 @@ export const AnimatedPaymentCard: React.FC<AnimatedPaymentCardProps> = ({
             </div>
           </div>
         </motion.div>
-      </div>
-
-      {/* Interactive Helper / Flip Button */}
-      <div className="mt-3 flex items-center gap-3">
-        <button
-          type="button"
-          onClick={toggleFlip}
-          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs text-zinc-500 hover:text-zinc-950 bg-zinc-100 hover:bg-zinc-200/80 transition-all font-medium cursor-pointer"
-        >
-          <RotateCw className="w-3 h-3 transition-transform hover:rotate-180" />
-          <span>{isFlipped ? 'Voir le recto' : 'Retourner la carte'}</span>
-        </button>
-
-        <span className="text-[11px] text-zinc-400 hidden sm:inline">
-          Survol interactif en 3D
-        </span>
       </div>
     </div>
   );

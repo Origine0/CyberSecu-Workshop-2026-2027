@@ -271,9 +271,10 @@ async def list_recent_transactions(
     tags=["WAF & Remediation"]
 )
 async def get_waf_status():
-    """Fournit les statistiques de menaces bloquées, les IP bannies et l'historique Ansible du moteur de remédiation."""
+    """Fournit les statistiques de menaces bloquées, les IP bannies, l'historique Ansible et les séries Prometheus/Grafana."""
     import asyncio
     import json as _json
+    import urllib.parse as _uparse
     import urllib.request as _ureq
 
     def _fetch_remediation():
@@ -290,11 +291,101 @@ async def get_waf_status():
         except Exception:
             return {"status": "OFFLINE", "queue": 0, "recent_actions": []}
 
-    remediation_info = await asyncio.to_thread(_fetch_remediation)
+    def _prom_instant(expr: str):
+        q = _uparse.urlencode({"query": expr})
+        with _ureq.urlopen(f"http://prometheus:9090/api/v1/query?{q}", timeout=0.6) as resp:
+            return _json.loads(resp.read()).get("data", {}).get("result", [])
+
+    def _prom_range(expr: str, minutes: int = 10, step: int = 15):
+        end_ts = int(time.time())
+        start_ts = end_ts - (minutes * 60)
+        q = _uparse.urlencode({"query": expr, "start": start_ts, "end": end_ts, "step": step})
+        with _ureq.urlopen(f"http://prometheus:9090/api/v1/query_range?{q}", timeout=0.7) as resp:
+            return _json.loads(resp.read()).get("data", {}).get("result", [])
+
+    def _fetch_grafana_metrics():
+        try:
+            # 1. Séries temporelles des panneaux Grafana (resilience-infra.json)
+            score_res = _prom_range("ml_anomaly_score", minutes=10, step=15)
+            anomaly_score_series = [
+                {"ts": int(float(pt[0]) * 1000), "value": round(float(pt[1]), 4)}
+                for pt in (score_res[0].get("values", []) if score_res else [])
+            ]
+
+            feat_res = _prom_range("ml_feature", minutes=10, step=15)
+            features_series = {}
+            for stream in feat_res:
+                fname = stream.get("metric", {}).get("name", "unknown")
+                features_series[fname] = [
+                    {"ts": int(float(pt[0]) * 1000), "value": round(float(pt[1]), 3)}
+                    for pt in stream.get("values", [])
+                ]
+
+            http_res = _prom_range('sum by (status) (rate(http_requests_total{handler!="/metrics"}[1m]))', minutes=10, step=15)
+            http_status_series = {}
+            for stream in http_res:
+                code = stream.get("metric", {}).get("status", "2xx")
+                http_status_series[code] = [
+                    {"ts": int(float(pt[0]) * 1000), "value": round(float(pt[1]), 3)}
+                    for pt in stream.get("values", [])
+                ]
+
+            # 2. KPIs instantanés & Santé conteneurs (Panneaux #18, #19, #20, #21, #4, #13, #14, #15)
+            ml_anom_res = _prom_instant("max(ml_anomaly)")
+            ml_anomaly = int(float(ml_anom_res[0]["value"][1])) if ml_anom_res else 0
+
+            alerts_res = _prom_instant("round(sum(increase(ml_alerts_sent_total[1h]))) or vector(0)")
+            ml_alerts_1h = int(float(alerts_res[0]["value"][1])) if alerts_res else 0
+
+            remed_ok_res = _prom_instant('round(sum(increase(remediation_actions_total{result="success"}[1h]))) or vector(0)')
+            remediation_ok_1h = int(float(remed_ok_res[0]["value"][1])) if remed_ok_res else 0
+
+            remed_ko_res = _prom_instant('round(sum(increase(remediation_actions_total{result="failure"}[1h]))) or vector(0)')
+            remediation_ko_1h = int(float(remed_ko_res[0]["value"][1])) if remed_ko_res else 0
+
+            up_res = _prom_instant("sum(up) / count(up)")
+            targets_up_ratio = round(float(up_res[0]["value"][1]) * 100, 1) if up_res else 100.0
+
+            containers = {}
+            for item in _prom_instant("max by (service) (docker_container_healthy)"):
+                svc = item.get("metric", {}).get("service")
+                if svc:
+                    containers.setdefault(svc, {})["healthy"] = int(float(item["value"][1])) == 1
+
+            for item in _prom_instant("sum by (service) (rate(docker_container_cpu_usage_seconds_total[1m]))"):
+                svc = item.get("metric", {}).get("service")
+                if svc:
+                    containers.setdefault(svc, {})["cpu_pct"] = round(float(item["value"][1]) * 100, 2)
+
+            for item in _prom_instant("sum by (service) (docker_container_memory_usage_bytes)"):
+                svc = item.get("metric", {}).get("service")
+                if svc:
+                    containers.setdefault(svc, {})["mem_mb"] = round(float(item["value"][1]) / (1024 * 1024), 1)
+
+            return {
+                "online": True,
+                "ml_anomaly": ml_anomaly == 1,
+                "ml_alerts_1h": ml_alerts_1h,
+                "remediation_ok_1h": remediation_ok_1h,
+                "remediation_ko_1h": remediation_ko_1h,
+                "targets_up_ratio": targets_up_ratio,
+                "anomaly_score_series": anomaly_score_series[-30:],
+                "features_series": {k: v[-30:] for k, v in features_series.items()},
+                "http_status_series": {k: v[-30:] for k, v in http_status_series.items()},
+                "containers": containers,
+            }
+        except Exception:
+            return None
+
+    remediation_info, grafana_info = await asyncio.gather(
+        asyncio.to_thread(_fetch_remediation),
+        asyncio.to_thread(_fetch_grafana_metrics),
+    )
     return {
         "banned_ips": list(waf_state.banned_ips.keys()),
         "stats": waf_state.stats,
         "remediation": remediation_info,
+        "grafana": grafana_info,
     }
 
 

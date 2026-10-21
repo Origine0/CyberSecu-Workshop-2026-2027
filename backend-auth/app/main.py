@@ -35,6 +35,9 @@ MAX_DEPOSIT = Decimal(os.environ.get("MAX_DEPOSIT", "10000"))
 MAX_BALANCE = Decimal("1000000")
 USERNAME_RE = re.compile(r"^[a-zA-Z0-9_.-]{3,40}$")
 
+ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin").strip().lower()
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
+
 # anti brute-force : 5 échecs / 5 min par (ip, utilisateur), en mémoire
 _FAILS: dict[str, list[float]] = {}
 FAIL_LIMIT, FAIL_WINDOW = 5, 300
@@ -53,6 +56,33 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 """
+
+
+async def bootstrap_admin(c):
+    if not ADMIN_PASSWORD:
+        return
+    admin_hash = hash_password(ADMIN_PASSWORD)
+    existing = await c.fetchrow(
+        "SELECT id, account_id FROM users WHERE username = $1",
+        ADMIN_USERNAME,
+    )
+    if not existing:
+        acct = await c.fetchrow(
+            "INSERT INTO accounts (account_number, holder_name, balance, currency, status) "
+            "VALUES ($1, $2, 99999.00, 'EUR', 'ACTIVE') RETURNING id",
+            new_account_number(), "Administrateur Système",
+        )
+        await c.execute(
+            "INSERT INTO users (username, password_hash, account_id, role) VALUES ($1, $2, $3, 'ADMIN')",
+            ADMIN_USERNAME, admin_hash, acct["id"],
+        )
+        log.info("Compte administrateur initialisé avec succès : '%s' (rôle: ADMIN)", ADMIN_USERNAME)
+    else:
+        await c.execute(
+            "UPDATE users SET password_hash = $1, role = 'ADMIN' WHERE id = $2",
+            admin_hash, existing["id"],
+        )
+        log.info("Compte administrateur '%s' synchronisé (mot de passe et rôle ADMIN)", ADMIN_USERNAME)
 
 
 @asynccontextmanager
@@ -75,6 +105,7 @@ async def lifespan(app: FastAPI):
         raise RuntimeError("PostgreSQL injoignable")
     async with pool.acquire() as c:
         await c.execute(SCHEMA)
+        await bootstrap_admin(c)
     yield
     await pool.close()
 
@@ -99,10 +130,10 @@ def verify_password(password: str, stored: str) -> bool:
         return False
 
 
-def make_token(user_id: str, username: str, account_id: str) -> str:
+def make_token(user_id: str, username: str, account_id: str, role: str = "CUSTOMER") -> str:
     now = datetime.now(timezone.utc)
     return jwt.encode(
-        {"sub": user_id, "usr": username, "acct": account_id,
+        {"sub": user_id, "usr": username, "acct": account_id, "role": role,
          "iat": now, "exp": now + timedelta(minutes=JWT_TTL_MIN)},
         JWT_SECRET, algorithm=JWT_ALG,
     )
@@ -180,6 +211,8 @@ def new_account_number() -> str:
 async def register(body: RegisterRequest, req: Request):
     if not USERNAME_RE.match(body.username):
         raise HTTPException(422, "Identifiant : 3 à 40 caractères (lettres, chiffres, _ . -)")
+    if body.username.lower() == ADMIN_USERNAME:
+        raise HTTPException(409, "Cet identifiant est réservé à l'administration")
     pw_hash = await asyncio.to_thread(hash_password, body.password)
     async with pool.acquire() as c:
         async with c.transaction():
@@ -191,13 +224,13 @@ async def register(body: RegisterRequest, req: Request):
                 new_account_number(), body.holder_name.strip(),
             )
             user = await c.fetchrow(
-                "INSERT INTO users (username, password_hash, account_id) VALUES ($1, $2, $3) RETURNING id",
+                "INSERT INTO users (username, password_hash, account_id, role) VALUES ($1, $2, $3, 'CUSTOMER') RETURNING id",
                 body.username.lower(), pw_hash, acct["id"],
             )
             await audit(c, "USER_REGISTERED", "INFO", {"username": body.username.lower(), "ip": client_ip(req)})
     metrics["register"] += 1
-    token = make_token(str(user["id"]), body.username.lower(), str(acct["id"]))
-    return {"token": token, "token_type": "bearer", "expires_in": JWT_TTL_MIN * 60}
+    token = make_token(str(user["id"]), body.username.lower(), str(acct["id"]), "CUSTOMER")
+    return {"token": token, "token_type": "bearer", "expires_in": JWT_TTL_MIN * 60, "role": "CUSTOMER"}
 
 
 @app.post("/login")
@@ -212,7 +245,7 @@ async def login(body: Credentials, req: Request):
         raise HTTPException(429, "Trop de tentatives, réessayez dans quelques minutes")
 
     async with pool.acquire() as c:
-        row = await c.fetchrow("SELECT id, password_hash, account_id FROM users WHERE username = $1", username)
+        row = await c.fetchrow("SELECT id, password_hash, account_id, role FROM users WHERE username = $1", username)
         # on calcule toujours un hash pour ne pas révéler si l'utilisateur existe
         ok = await asyncio.to_thread(verify_password, body.password, row["password_hash"] if row else "scrypt$00$00")
         if not (row and ok):
@@ -222,13 +255,14 @@ async def login(body: Credentials, req: Request):
             raise HTTPException(401, "Identifiant ou mot de passe incorrect")
     _FAILS.pop(key, None)
     metrics["login_ok"] += 1
-    return {"token": make_token(str(row["id"]), username, str(row["account_id"])),
-            "token_type": "bearer", "expires_in": JWT_TTL_MIN * 60}
+    role = row["role"] if (row and "role" in row and row["role"]) else "CUSTOMER"
+    return {"token": make_token(str(row["id"]), username, str(row["account_id"]), role),
+            "token_type": "bearer", "expires_in": JWT_TTL_MIN * 60, "role": role}
 
 
 async def load_account(c, claims: dict):
     row = await c.fetchrow(
-        "SELECT u.username, a.id, a.account_number, a.holder_name, a.balance, a.currency, a.status "
+        "SELECT u.username, u.role, a.id, a.account_number, a.holder_name, a.balance, a.currency, a.status "
         "FROM users u JOIN accounts a ON a.id = u.account_id WHERE u.id = $1::uuid",
         claims["sub"],
     )
@@ -238,9 +272,15 @@ async def load_account(c, claims: dict):
 
 
 def account_json(row) -> dict:
-    return {"username": row["username"], "holder_name": row["holder_name"],
-            "account_number": row["account_number"], "balance": float(row["balance"]),
-            "currency": row["currency"], "status": row["status"]}
+    return {
+        "username": row["username"],
+        "holder_name": row["holder_name"],
+        "account_number": row["account_number"],
+        "balance": float(row["balance"]),
+        "currency": row["currency"],
+        "status": row["status"],
+        "role": row["role"] if ("role" in row and row["role"]) else "CUSTOMER",
+    }
 
 
 @app.get("/me")
