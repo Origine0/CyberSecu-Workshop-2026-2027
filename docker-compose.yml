@@ -90,6 +90,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET manquant dans .env}
       # false : les paiements anonymes (traffic-gen, carte directe) restent acceptés
       REQUIRE_AUTH: ${REQUIRE_AUTH:-false}
+    volumes:
+      - ./backend/app:/app/app:ro
     depends_on:
       postgres:
         condition: service_healthy

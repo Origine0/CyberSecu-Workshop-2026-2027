@@ -66,6 +66,19 @@
   }
 }
 
+@keyframes orb-pulse-confinement {
+  0%, 100% {
+    transform: scale(0.98);
+    opacity: 0.88;
+    filter: drop-shadow(0 0 20px rgba(245, 158, 11, 0.75));
+  }
+  50% {
+    transform: scale(1.12);
+    opacity: 1;
+    filter: drop-shadow(0 0 40px rgba(245, 158, 11, 0.95));
+  }
+}
+
 @keyframes orb-pulse-rag {
   0%, 100% {
     transform: scale(0.98);
@@ -130,6 +143,10 @@
 
 .animate-orb-attack {
   animation: orb-pulse-attack 0.65s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.animate-orb-confinement {
+  animation: orb-pulse-confinement 1.2s ease-in-out infinite;
 }
 
 .animate-orb-rag {

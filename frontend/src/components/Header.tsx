@@ -4,7 +4,8 @@ import {
   LayoutDashboard, 
   Terminal, 
   Database, 
-  UserRound
+  UserRound,
+  Bot
 } from 'lucide-react';
 import { HealthCheckResponse } from '../types/index.ts';
 import { Account } from '../utils/api.ts';
@@ -114,6 +115,15 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Minimal Controls */}
           <div className="flex items-center gap-2.5 shrink-0">
+            <a
+              href="/robot"
+              className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-zinc-900 hover:bg-zinc-800 text-sky-400 border border-zinc-800 transition-colors shadow-xs"
+              title="Ouvrir l'interface robot 800x480"
+            >
+              <Bot className="w-3.5 h-3.5" />
+              <span>Écran Robot</span>
+            </a>
+
             <div className="hidden sm:flex items-center gap-1.5 text-xs text-zinc-500 font-normal">
               <span className={`w-1.5 h-1.5 rounded-full ${isDegraded ? 'bg-amber-500' : 'bg-emerald-500'}`} />
               <span>{health.database.latency_ms} ms</span>

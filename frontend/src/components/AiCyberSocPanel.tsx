@@ -26,6 +26,7 @@ import { AiAnalyzeResponse, AiAskResponse, Transaction, WafStatusResponse } from
 import { AiPulseOrb, OrbState } from './AiPulseOrb.tsx';
 import { useVoiceAssistant } from '../hooks/useVoiceAssistant.ts';
 import { soundFx } from '../utils/audioAlerts.ts';
+import { useVoiceRecognition } from '../hooks/useVoiceRecognition.ts';
 
 interface AiCyberSocPanelProps {
   isDegraded?: boolean;
@@ -45,7 +46,7 @@ export const AiCyberSocPanel: React.FC<AiCyberSocPanelProps> = ({
   transactions = [],
   wafStatus,
 }) => {
-  const [aiEndpoint] = useState<string>('http://localhost:8001');
+  const [aiEndpoint] = useState<string>('/ai');
   const [isAiOnline, setIsAiOnline] = useState<boolean | null>(null);
 
   // Hook de synthèse vocale et d'effets sonores
@@ -57,6 +58,34 @@ export const AiCyberSocPanel: React.FC<AiCyberSocPanelProps> = ({
     speakRag, 
     stopSpeaking 
   } = useVoiceAssistant();
+
+  // Hook de reconnaissance vocale (Speech-to-Text) pour interroger le RAG
+  const { 
+    isListening, 
+    transcript: micTranscript, 
+    startListening, 
+    stopListening 
+  } = useVoiceRecognition();
+
+  useEffect(() => {
+    if (micTranscript) {
+      setRagQuery(micTranscript);
+    }
+  }, [micTranscript]);
+
+  const toggleMicListening = () => {
+    if (isListening) {
+      stopListening();
+      if (ragQuery.trim()) {
+        handleAsk(ragQuery, true);
+      }
+    } else {
+      startListening((finalText) => {
+        setRagQuery(finalText);
+        handleAsk(finalText, true);
+      });
+    }
+  };
 
   // Journal des annonces vocales de l'IA (HUD Control Room)
   const [voiceLogs, setVoiceLogs] = useState<VoiceLogEntry[]>([]);
@@ -95,7 +124,7 @@ export const AiCyberSocPanel: React.FC<AiCyberSocPanelProps> = ({
 
   // Calcul dynamique de l'état visuel de l'Orbe holographique
   const orbState: OrbState = mlResult?.is_anomaly 
-    ? 'attack' 
+    ? (incidentStageRef.current === 'REMEDIATING' ? 'confinement' : 'attack') 
     : isSpeaking 
     ? 'rag' 
     : 'idle';
@@ -624,6 +653,18 @@ export const AiCyberSocPanel: React.FC<AiCyberSocPanelProps> = ({
             placeholder="Poser une question sur procedures.pdf ou la gouvernance..."
             className="flex-1 bg-white border border-zinc-200 rounded-lg px-2.5 py-1.5 text-xs text-zinc-900 outline-none focus:border-zinc-400 font-normal placeholder:text-zinc-400"
           />
+          <button
+            type="button"
+            onClick={toggleMicListening}
+            className={`p-2 rounded-lg border text-xs font-medium flex items-center justify-center transition-all shadow-xs cursor-pointer ${
+              isListening 
+                ? 'bg-rose-500 border-rose-600 text-white animate-pulse' 
+                : 'bg-zinc-100 hover:bg-zinc-200 border-zinc-200 text-zinc-700'
+            }`}
+            title={isListening ? "Arrêter l'écoute et envoyer" : "Poser une question vocale au RAG (Microphone)"}
+          >
+            <Mic className={`w-3.5 h-3.5 ${isListening ? 'animate-bounce text-white' : ''}`} />
+          </button>
           <button
             type="button"
             onClick={() => handleAsk()}

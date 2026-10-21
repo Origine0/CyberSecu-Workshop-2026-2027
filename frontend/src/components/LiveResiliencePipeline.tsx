@@ -64,6 +64,8 @@ export const LiveResiliencePipeline: React.FC<LiveResiliencePipelineProps> = ({
   const latestTx = transactions[0];
   const totalBlocked = wafStatus?.stats.total_blocked ?? 0;
   const bannedCount = wafStatus?.banned_ips.length ?? 0;
+  const remediationActions = wafStatus?.remediation?.recent_actions ?? [];
+  const lastRemediation = remediationActions[remediationActions.length - 1];
 
   const nodes: PipelineNode[] = [
     {
@@ -121,9 +123,17 @@ export const LiveResiliencePipeline: React.FC<LiveResiliencePipelineProps> = ({
       label: 'Moteur Autonome',
       sublabel: 'Zero-Touch Recovery',
       icon: Cpu,
-      status: isDegraded ? 'active' : 'nominal',
-      metric: isDegraded ? 'Reprise...' : 'Veille',
-      detail: isDegraded ? 'Playbook Ansible & Blacklist WAF engagés (RTO < 15s)' : 'Surveillance continue 24/7',
+      status: isDegraded || remediationActions.length > 0 ? 'active' : 'nominal',
+      metric: isDegraded
+        ? 'Reprise...'
+        : remediationActions.length > 0
+        ? `${remediationActions.length} playbook(s)`
+        : 'Veille',
+      detail: lastRemediation
+        ? `Dernier playbook : ${lastRemediation.action} sur ${lastRemediation.service} (${lastRemediation.duration_s}s)`
+        : isDegraded
+        ? 'Playbook Ansible & Blacklist WAF engagés (RTO < 15s)'
+        : 'Surveillance continue 24/7 (Ansible Worker)',
       tech: 'Ansible • Socket Proxy',
     },
   ];

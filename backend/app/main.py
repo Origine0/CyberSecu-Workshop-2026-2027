@@ -271,10 +271,30 @@ async def list_recent_transactions(
     tags=["WAF & Remediation"]
 )
 async def get_waf_status():
-    """Fournit les statistiques de menaces bloquées et les adresses IP bannies au SOC / Dashboard."""
+    """Fournit les statistiques de menaces bloquées, les IP bannies et l'historique Ansible du moteur de remédiation."""
+    import asyncio
+    import json as _json
+    import urllib.request as _ureq
+
+    def _fetch_remediation():
+        try:
+            with _ureq.urlopen("http://remediation:8020/health", timeout=0.8) as rh:
+                h = _json.loads(rh.read())
+            with _ureq.urlopen("http://remediation:8020/status", timeout=0.8) as rs:
+                s = _json.loads(rs.read())
+            return {
+                "status": h.get("status", "UP"),
+                "queue": h.get("queue", 0),
+                "recent_actions": list(reversed(s.get("recent_actions", []))),
+            }
+        except Exception:
+            return {"status": "OFFLINE", "queue": 0, "recent_actions": []}
+
+    remediation_info = await asyncio.to_thread(_fetch_remediation)
     return {
         "banned_ips": list(waf_state.banned_ips.keys()),
-        "stats": waf_state.stats
+        "stats": waf_state.stats,
+        "remediation": remediation_info,
     }
 
 

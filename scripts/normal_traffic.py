@@ -16,7 +16,7 @@ import requests
 from datetime import datetime, timezone
 
 DEFAULT_URL = os.getenv("API_URL", "http://localhost:8082/api/pay")
-REMOTE_DEFAULT = "http://192.168.137.1:8082/api/pay"
+REMOTE_DEFAULT = os.getenv("REMOTE_API_URL", "http://192.168.137.1:8082/api/pay")
 
 MERCHANTS = ["MERCH_ALPHA", "MERCH_BETA", "MERCH_GAMMA"]
 CURRENCIES = ["EUR", "EUR", "EUR", "USD"]  # 75% EUR, 25% USD
