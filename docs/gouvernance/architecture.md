@@ -93,7 +93,7 @@ IP fixes configurées à la main sur chaque PC (le hotspot Windows ne permet pas
 | **waf** | nginx-unprivileged 1.28 | 8080 | edge, app | Liste blanche : /, /api/{pay,health,transactions,waf/status}, /auth/*, /ai/* ; inclut la liste de blocage | ✅ Fait | Mélanie, Clara |
 | **frontend** | React + Vite + Tailwind | 3000 | app | Paiement, compte, dashboard ; appelle /api, /auth, /ai via le waf | ✅ Fait | Antoine |
 | **payment-api** | FastAPI (backend/) | 8000 | app, data | Paiements, débit du solde si client authentifié, limitation de débit, /metrics | ✅ Fait | Antoine, Clara |
-| **auth** | FastAPI (backend-auth/) | 8001 | app, data | Inscription, connexion (mots de passe scrypt), JWT HS256, solde, dépôt | ✅ Fait | Antoine |
+| **auth** | FastAPI (backend-auth/) | 8001 | app, data | Inscription, connexion (mots de passe scrypt, verrouillage après 5 échecs), JWT HS256, solde, dépôt | ✅ Fait | Antoine |
 | **postgres** | PostgreSQL 16.10 | 5432 | data | Comptes, transactions, journal d'audit ; rôle remediation_ro en lecture | ✅ Fait | Antoine, Mélanie |
 | **traffic-gen** | Python | — | app | Trafic normal : 1 paiement toutes les 2 s via le waf | ✅ Fait | Mélanie |
 | **prometheus** | Prometheus 3.5 | 9090 | app, monitoring | Collecte des métriques toutes les 15 s | ✅ Fait | Mélanie |
@@ -148,7 +148,7 @@ Les numéros correspondent aux pastilles du schéma. Tout flux absent est interd
 | Limitation de débit : 40 requêtes / 2 s par client sur /pay | backend/app/waf.py | ✅ Fait |
 | Routes /waf/block et /waf/unblock protégées par jeton (REMEDIATION_TOKEN) | backend/app/main.py | ✅ Fait |
 | simulate_failure ignoré sauf si CHAOS_MODE_ENABLED=true côté serveur | backend/app/services.py | ✅ Fait |
-| Authentification : mots de passe scrypt, jeton JWT HS256, débit du solde | backend-auth/app/main.py, backend/app/auth.py | ✅ Fait |
+| Authentification : mots de passe scrypt, verrouillage après 5 échecs par compte, jeton JWT HS256, débit du solde | backend-auth/app/main.py, backend/app/auth.py | ✅ Fait |
 | Paiements anonymes encore acceptés (REQUIRE_AUTH=false par défaut) | docker-compose.yml | ⚠️ Partiel |
 | Base non publiée, rôle remediation_ro en lecture pour la remédiation | docker-compose.yml, infra/postgres | ✅ Fait |
 | Accès Docker par proxys : lecture seule (supervision), redémarrage seul (remédiation) | docker-compose.yml | ✅ Fait |
