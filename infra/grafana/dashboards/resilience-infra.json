@@ -367,6 +367,178 @@
       }
     },
     {
+      "id": 26,
+      "type": "timeseries",
+      "title": "Trafic reçu par le WAF, par code HTTP (attaque et riposte en direct)",
+      "description": "Requêtes par seconde reçues par le WAF (toutes sources, sur 10 s). Pendant un flood : les 201 montent, puis les 503 apparaissent quand la remédiation pose la limitation ; des 403 si la signature de l'attaquant est bloquée.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 10,
+        "w": 24,
+        "h": 8
+      },
+      "interval": "5s",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (status) (rate({service=\"waf\"} |= \"HTTP/\" != \"/healthz\" | pattern `<_> - <_> [<_>] \"<method> <path> <_>\" <status> <_>` | status != \"\" [10s]))",
+          "legendFormat": "{{status}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "200"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "201"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "101"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "304"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "403"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "429"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "503"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "502"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
       "id": 23,
       "type": "timeseries",
       "title": "Score d'anomalie du modèle (sous 0 = anomalie)",
@@ -423,7 +595,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 10,
+        "y": 18,
         "w": 12,
         "h": 8
       }
@@ -486,7 +658,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 10,
+        "y": 18,
         "w": 12,
         "h": 8
       }
@@ -517,7 +689,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 18,
+        "y": 26,
         "w": 24,
         "h": 9
       }
@@ -572,7 +744,7 @@
       "id": 1,
       "gridPos": {
         "x": 0,
-        "y": 27,
+        "y": 35,
         "w": 6,
         "h": 4
       }
@@ -631,7 +803,7 @@
       "id": 2,
       "gridPos": {
         "x": 6,
-        "y": 27,
+        "y": 35,
         "w": 6,
         "h": 4
       }
@@ -694,7 +866,7 @@
       "id": 3,
       "gridPos": {
         "x": 12,
-        "y": 27,
+        "y": 35,
         "w": 6,
         "h": 4
       }
@@ -756,7 +928,7 @@
       "id": 4,
       "gridPos": {
         "x": 18,
-        "y": 27,
+        "y": 35,
         "w": 6,
         "h": 4
       }
@@ -805,7 +977,7 @@
       "id": 5,
       "gridPos": {
         "x": 0,
-        "y": 31,
+        "y": 39,
         "w": 12,
         "h": 8
       }
@@ -864,7 +1036,7 @@
       "id": 6,
       "gridPos": {
         "x": 12,
-        "y": 31,
+        "y": 39,
         "w": 12,
         "h": 8
       }
@@ -914,7 +1086,7 @@
       "id": 7,
       "gridPos": {
         "x": 0,
-        "y": 39,
+        "y": 47,
         "w": 12,
         "h": 8
       }
@@ -964,7 +1136,7 @@
       "id": 8,
       "gridPos": {
         "x": 12,
-        "y": 39,
+        "y": 47,
         "w": 12,
         "h": 8
       }
@@ -1014,7 +1186,7 @@
       "id": 9,
       "gridPos": {
         "x": 16,
-        "y": 63,
+        "y": 71,
         "w": 8,
         "h": 8
       }
@@ -1045,7 +1217,7 @@
       "id": 11,
       "gridPos": {
         "x": 0,
-        "y": 71,
+        "y": 79,
         "w": 24,
         "h": 10
       }
@@ -1097,7 +1269,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 47,
+        "y": 55,
         "w": 12,
         "h": 8
       }
@@ -1149,7 +1321,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 47,
+        "y": 55,
         "w": 12,
         "h": 8
       }
@@ -1221,7 +1393,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 55,
+        "y": 63,
         "w": 24,
         "h": 8
       }
@@ -1279,7 +1451,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 63,
+        "y": 71,
         "w": 16,
         "h": 8
       }

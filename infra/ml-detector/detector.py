@@ -120,6 +120,12 @@ def container_states():
     return [s for s in WATCHED if values.get(s, {}).get("running", 0) < 1 or values.get(s, {}).get("healthy", 0) < 1]
 
 
+def top_agent(entries):
+    """Signature dominante (nom de l'outil sans sa version, ex. "python-requests") : le moteur décide s'il la bloque."""
+    agents = Counter(g[4].split("/")[0].strip() for g in entries if g[4] and g[4] != "-")
+    return agents.most_common(1)[0][0] if agents else ""
+
+
 def diagnose(waf):
     """Cause probable de l'anomalie, pour choisir la réponse. None = pas de cause sur laquelle agir
     (perturbation passagère, par exemple pendant un redéploiement) : on n'envoie pas d'alerte."""
@@ -138,19 +144,23 @@ def diagnose(waf):
         # signature = nom de l'outil d'attaque trouvé dans le User-Agent (ex. "sqlmap")
         tools = Counter(SCANNER_UA.search(g[4]).group(0).lower() for g in suspicious if SCANNER_UA.search(g[4]))
         ip = Counter(g[0] for g in suspicious).most_common(1)[0][0]
+        # forbidden_user_agent : si cette signature est déjà bloquée, ces 403 sont la riposte elle-même
         return {"type": "intrusion", "service": "payment-api", "source_ip": ip,
-                "user_agent": tools.most_common(1)[0][0] if tools else ""}
+                "user_agent": tools.most_common(1)[0][0] if tools else "", "forbidden_user_agent": top_agent(forbidden)}
     # flood : un même client envoie bien plus de paiements qu'un utilisateur, même si l'API ne les refuse pas encore
     payments = Counter(g[0] for g in waf if g[1] == "POST" and g[2].startswith("/api/pay"))
     if payments and payments.most_common(1)[0][1] >= FLOOD_RPS * WINDOW_S:
-        return {"type": "dos", "service": "payment-api", "source_ip": payments.most_common(1)[0][0]}
+        ip = payments.most_common(1)[0][0]
+        return {"type": "dos", "service": "payment-api", "source_ip": ip,
+                "user_agent": top_agent([g for g in waf if g[0] == ip and g[1] == "POST" and g[2].startswith("/api/pay")])}
     # ou la majorité des erreurs sont des refus de limitation de débit (429 par l'API, 503 par le WAF) ou de
     # validation (422, fuzzing), en nombre suffisant : une saisie invalide isolée n'est pas un flood
     errors = [g for g in waf if int(g[3]) >= 400]
     throttled = [g for g in errors if g[3] in ("429", "503", "422")]
     if len(throttled) >= THROTTLED_MIN and len(throttled) * 2 >= len(errors):
-        top_ip = Counter(g[0] for g in throttled).most_common(1)
-        return {"type": "dos", "service": "payment-api", "source_ip": top_ip[0][0]}
+        top_ip = Counter(g[0] for g in throttled).most_common(1)[0][0]
+        return {"type": "dos", "service": "payment-api", "source_ip": top_ip,
+                "user_agent": top_agent([g for g in throttled if g[0] == top_ip])}
     return None
 
 

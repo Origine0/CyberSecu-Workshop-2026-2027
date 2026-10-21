@@ -25,6 +25,9 @@ BLOCKLIST_DIR = os.environ.get("WAF_BLOCKLIST_DIR", "/blocklist")
 COOLDOWN_S = int(os.environ.get("COOLDOWN_S", "90"))   # une action par service et par type sur cette durée
 MAX_ACTIONS = int(os.environ.get("MAX_ACTIONS_10MIN", "3"))  # au-delà, on arrête d'agir (évite les boucles)
 PLAYBOOK_TIMEOUT_S = 240
+ESCALATE_AFTER_S = int(os.environ.get("ESCALATE_AFTER_S", "20"))  # flood qui continue malgré la limitation -> blocage
+# signatures jamais bloquées : navigateurs (tous les visiteurs) et services de la plateforme
+PROTECTED_AGENTS = {"mozilla", "resilience-traffic-gen", "ansible-httpget"}
 
 ALERT_TYPES = ("crash", "dos", "intrusion")
 SERVICE_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}$")
@@ -65,12 +68,28 @@ def rule_exists(extra):
     return os.path.exists(f"{BLOCKLIST_DIR}/{extra['block_type']}{suffix}.conf")
 
 
+def blockable_agent(ua):
+    return bool(UA_RE.match(ua or "")) and ua.lower() not in PROTECTED_AGENTS
+
+
+def ratelimit_age():
+    """Depuis combien de secondes la limitation de débit est en place (None si elle ne l'est pas)."""
+    try:
+        return time.time() - os.path.getmtime(f"{BLOCKLIST_DIR}/ratelimit.conf")
+    except OSError:
+        return None
+
+
 def plan_for(alert):
     """Étapes (playbook, variables, seulement_si_le_service_est_KO) à lancer pour une alerte."""
     service, kind = alert["service"], alert["type"]
     if kind == "crash":
         # revérifié juste avant d'agir : un service revenu entre-temps n'est pas redémarré
         return [("restart_service", {"service": service}, True)]
+    if kind == "dos" and alert.get("escalate"):
+        # la limitation n'a pas suffi : on bloque la signature de l'attaquant (403), les autres clients passent
+        return [("block_source", {"block_type": "user_agent", "value": alert["user_agent"]}, False),
+                ("restart_service", {"service": service}, True)]
     if kind == "dos":
         # confinement d'abord (limitation de débit dans le WAF), puis reprise du service s'il est tombé
         return [("block_source", {"block_type": "ratelimit"}, False), ("restart_service", {"service": service}, True)]
@@ -104,6 +123,11 @@ def worker():
         if alert["type"] == "intrusion" and steps[0][0] == "block_source" and rule_exists(steps[0][1]):
             log(alert_id=alert["alert_id"], step="skipped", action="all", reason="source déjà bloquée")
             continue
+        # 403 renvoyés à une signature déjà bloquée (par exemple après une escalade) : c'est la riposte, pas une intrusion
+        fua = alert.get("forbidden_user_agent") or ""
+        if alert["type"] == "intrusion" and UA_RE.match(fua) and rule_exists({"block_type": "user_agent", "value": fua}):
+            log(alert_id=alert["alert_id"], step="skipped", action="all", reason="refus dus à une signature déjà bloquée")
+            continue
         acted = False
         for name, extra, only_if_down in steps:
             if only_if_down and is_healthy(alert["service"]):
@@ -127,7 +151,7 @@ def worker():
         if not acted:
             # rien n'a été fait (service revenu entre-temps) : on ne bloque pas les alertes suivantes
             with lock:
-                last_action.pop((alert["service"], alert["type"]), None)
+                last_action.pop((alert["service"], "dos-escalade" if alert.get("escalate") else alert["type"]), None)
                 if accepted_alerts and accepted_alerts[-1][1] == alert["service"]:
                     accepted_alerts.pop()
 
@@ -144,7 +168,10 @@ def accept(alert):
         if alert_id in seen_alerts:
             return 200, "déjà traitée"
         seen_alerts.append(alert_id)
-        key = (alert["service"], alert["type"])
+        # escalade : flood toujours là alors que la limitation est en place depuis ESCALATE_AFTER_S
+        age = ratelimit_age() if alert["type"] == "dos" else None
+        escalate = age is not None and age >= ESCALATE_AFTER_S and blockable_agent(alert.get("user_agent"))
+        key = (alert["service"], "dos-escalade" if escalate else alert["type"])
         if now - last_action.get(key, 0) < COOLDOWN_S:
             return 202, "ignorée : action déjà lancée récemment pour ce service"
         if sum(1 for ts, svc in accepted_alerts if svc == alert["service"] and now - ts < 600) >= MAX_ACTIONS:
@@ -152,8 +179,9 @@ def accept(alert):
             return 429, "trop d'alertes traitées pour ce service en 10 min, le moteur n'agit plus"
         last_action[key] = now
         accepted_alerts.append((now, alert["service"]))
-    jobs.put({**alert, "alert_id": alert_id})
-    log(alert_id=alert_id, step="accepted", type=alert["type"], service=alert["service"], score=alert.get("score"))
+    jobs.put({**alert, "alert_id": alert_id, "escalate": escalate})
+    log(alert_id=alert_id, step="accepted", type=alert["type"], service=alert["service"], score=alert.get("score"),
+        escalate=escalate)
     return 202, "action planifiée"
 
 
