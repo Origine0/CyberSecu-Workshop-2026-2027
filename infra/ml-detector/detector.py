@@ -38,6 +38,7 @@ CONFIRMATIONS = int(os.environ.get("CONFIRMATIONS", "2"))  # anomalies consécut
 WARMUP_S = int(os.environ.get("WARMUP_S", "25"))  # pas d'alerte juste après un démarrage de la stack
 FORBIDDEN_MIN = int(os.environ.get("FORBIDDEN_MIN", "3"))  # refus 403 sans signature avant de parler d'intrusion
 FLOOD_RPS = float(os.environ.get("FLOOD_RPS", "3"))  # paiements par seconde d'un même client (un utilisateur en fait moins de 0,1)
+THROTTLED_MIN = int(os.environ.get("THROTTLED_MIN", "10"))  # refus 429/503/422 sur la fenêtre avant de parler de flood
 STARTED = time.time()
 PORT = int(os.environ.get("PORT", "8010"))
 HEARTBEAT = "/tmp/ml-detector.heartbeat"
@@ -139,10 +140,11 @@ def diagnose(waf):
     payments = Counter(g[0] for g in waf if g[1] == "POST" and g[2].startswith("/api/pay"))
     if payments and payments.most_common(1)[0][1] >= FLOOD_RPS * WINDOW_S:
         return {"type": "dos", "service": "payment-api", "source_ip": payments.most_common(1)[0][0]}
-    # ou la majorité des erreurs sont des refus de limitation de débit (429 par l'API, 503 par le WAF)
+    # ou la majorité des erreurs sont des refus de limitation de débit (429 par l'API, 503 par le WAF) ou de
+    # validation (422, fuzzing), en nombre suffisant : une saisie invalide isolée n'est pas un flood
     errors = [g for g in waf if int(g[3]) >= 400]
     throttled = [g for g in errors if g[3] in ("429", "503", "422")]
-    if errors and len(throttled) * 2 >= len(errors):
+    if len(throttled) >= THROTTLED_MIN and len(throttled) * 2 >= len(errors):
         top_ip = Counter(g[0] for g in throttled).most_common(1)
         return {"type": "dos", "service": "payment-api", "source_ip": top_ip[0][0]}
     return None

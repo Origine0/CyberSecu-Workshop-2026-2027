@@ -141,6 +141,7 @@ make ps               # État des 17 services
 make check            # Santé globale, filtrage WAF, isolation des ports internes et syntaxe Ansible
 make security-check   # Audit complet d'exposition réseau, des droits Docker socket-proxy et Postgres
 make secret-scan      # Vérification d'absence de secrets en clair dans le dépôt Git
+make demo-ready       # Avant une démo ou une répétition : blocages retirés, moteur remis à zéro, contrôles (~2 min)
 make chaos SERVICE=payment-api PANNE=20   # Panne simulée puis réparation automatique chronométrée
 ```
 
