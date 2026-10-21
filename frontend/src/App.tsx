@@ -185,7 +185,12 @@ export default function App() {
   const handleRemotePayment = async (req: PaymentRequest): Promise<Transaction> => {
     const merchantCode = req.merchant_id === 'mch_saas_02' ? 'MERCH_FINTECH' : 'MERCH_ALPHA';
     const merchant = INITIAL_MERCHANTS.find((m) => m.id === req.merchant_id);
-    const idempotencyKey = req.idempotency_key || crypto.randomUUID();
+    // crypto.randomUUID n'existe qu'en contexte sécurisé (https ou localhost) : repli pour l'accès en http par IP
+    const idempotencyKey =
+      req.idempotency_key ||
+      (globalThis.crypto?.randomUUID
+        ? crypto.randomUUID()
+        : `idemp_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`);
     const cardLast4 = req.card_number.replace(/\s+/g, '').slice(-4) || '4242';
 
     let res: api.RemotePaymentResponse;
