@@ -61,6 +61,30 @@ export interface RemediationAction {
   duration_s: number;
 }
 
+export interface GrafanaTimeSeriesPoint {
+  ts: number;
+  value: number;
+}
+
+export interface GrafanaContainerMetric {
+  healthy?: boolean;
+  cpu_pct?: number;
+  mem_mb?: number;
+}
+
+export interface GrafanaTelemetry {
+  online: boolean;
+  ml_anomaly: boolean;
+  ml_alerts_1h: number;
+  remediation_ok_1h: number;
+  remediation_ko_1h: number;
+  targets_up_ratio: number;
+  anomaly_score_series: GrafanaTimeSeriesPoint[];
+  features_series: Record<string, GrafanaTimeSeriesPoint[]>;
+  http_status_series: Record<string, GrafanaTimeSeriesPoint[]>;
+  containers: Record<string, GrafanaContainerMetric>;
+}
+
 export interface WafStatusResponse {
   banned_ips: string[];
   stats: {
@@ -74,6 +98,7 @@ export interface WafStatusResponse {
     queue: number;
     recent_actions: RemediationAction[];
   };
+  grafana?: GrafanaTelemetry | null;
 }
 
 export interface HourlyVolumeCTE {
@@ -114,7 +139,6 @@ export interface ProjectSourceFile {
   badge?: string;
   content: string;
 }
-
 
 // ==============================================================================
 // Pilier IA & Data (Détection ML & Assistant RAG)

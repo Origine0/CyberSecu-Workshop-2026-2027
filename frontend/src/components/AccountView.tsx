@@ -158,8 +158,17 @@ export const AccountView: React.FC<AccountViewProps> = ({
     <div className="max-w-md mx-auto px-4 py-10">
       <div className="text-center mb-6">
         <h1 className="text-3xl font-semibold tracking-tight text-zinc-950">Mon compte</h1>
-        <p className="text-xs text-zinc-400 mt-1 flex items-center justify-center gap-1">
+        <p className="text-xs text-zinc-400 mt-1 flex items-center justify-center gap-1.5">
           <UserRound className="w-3 h-3" /> {account.holder_name} · @{account.username}
+          {account.role === 'ADMIN' ? (
+            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 border border-purple-200">
+              ADMINISTRATEUR
+            </span>
+          ) : (
+            <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-600">
+              CLIENT
+            </span>
+          )}
         </p>
       </div>
 
@@ -211,10 +220,20 @@ export const AccountView: React.FC<AccountViewProps> = ({
         </form>
 
         <div className="flex items-center justify-between mt-6 pt-4 border-t border-zinc-100 text-xs">
-          <button onClick={onGoToPay} className="font-medium text-zinc-900 hover:underline">
-            Payer avec ce compte →
-          </button>
-          <button onClick={onLogout} className="flex items-center gap-1 text-zinc-500 hover:text-zinc-900">
+          <div className="flex items-center gap-3">
+            <button onClick={onGoToPay} className="font-medium text-zinc-900 hover:underline cursor-pointer">
+              {account.role === 'ADMIN' ? 'Continuer →' : 'Payer avec ce compte →'}
+            </button>
+            {account.role === 'ADMIN' && (
+              <a
+                href="/dashboard"
+                className="font-medium text-purple-700 hover:text-purple-900 hover:underline cursor-pointer"
+              >
+                Dashboard Supervision →
+              </a>
+            )}
+          </div>
+          <button onClick={onLogout} className="flex items-center gap-1 text-zinc-500 hover:text-zinc-900 cursor-pointer">
             <LogOut className="w-3 h-3" /> Déconnexion
           </button>
         </div>

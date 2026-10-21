@@ -38,6 +38,7 @@ export interface Account {
   balance: number;
   currency: string;
   status: string;
+  role?: string;
 }
 
 export interface RemotePaymentResponse {
@@ -134,7 +135,7 @@ export async function fetchHealth(isDegradedOverride = false): Promise<HealthChe
   const start = performance.now();
   const raw = await request<BackendHealthRaw>(`${API_BASE}/health`, {
     signal: AbortSignal.timeout(2500),
-  });
+  }, true);
   const rttMs = Math.max(1, Math.round((performance.now() - start) * 10) / 10);
 
   const isUp = raw.status === 'UP' && raw.database === 'healthy';
@@ -172,7 +173,7 @@ export async function fetchHealth(isDegradedOverride = false): Promise<HealthChe
 export async function fetchTransactions(limit = 35): Promise<Transaction[]> {
   const rows = await request<BackendTransactionRaw[]>(`${API_BASE}/transactions?limit=${limit}`, {
     signal: AbortSignal.timeout(2500),
-  });
+  }, true);
 
   return rows.map((r, index) => {
     const meta = r.metadata || {};
@@ -220,7 +221,7 @@ export async function fetchTransactions(limit = 35): Promise<Transaction[]> {
 export async function fetchWafStatus(): Promise<WafStatusResponse> {
   return request<WafStatusResponse>(`${API_BASE}/waf/status`, {
     signal: AbortSignal.timeout(2500),
-  });
+  }, true);
 }
 
 
