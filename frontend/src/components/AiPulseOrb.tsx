@@ -1,13 +1,17 @@
 /**
  * @license
  * PROJECT RESILIENCE-ALPHA - Orbe de Traitement IA & Spectrogramme SOC
- * Visualisation temps réel des états de sécurité (Veille, Attaque, Synthèse RAG).
+ * Visualisation temps réel des 4 états de sécurité :
+ * 1. Veille (Cyan)
+ * 2. Attaque (Rouge vif + ondes de choc)
+ * 3. Confinement (Ambre/Orange remédiation)
+ * 4. RAG / Synthèse Vocale (Violet/Indigo)
  */
 
 import React from 'react';
-import { Volume2, VolumeX, ShieldAlert, Sparkles, Activity } from 'lucide-react';
+import { Volume2, VolumeX, ShieldAlert, ShieldCheck, Sparkles, Activity } from 'lucide-react';
 
-export type OrbState = 'idle' | 'attack' | 'rag';
+export type OrbState = 'idle' | 'attack' | 'confinement' | 'rag';
 
 interface AiPulseOrbProps {
   state: OrbState;
@@ -16,6 +20,7 @@ interface AiPulseOrbProps {
   onToggleMute: () => void;
   onTestVoice?: () => void;
   anomalyScore?: number;
+  compact?: boolean;
 }
 
 export const AiPulseOrb: React.FC<AiPulseOrbProps> = ({
@@ -25,6 +30,7 @@ export const AiPulseOrb: React.FC<AiPulseOrbProps> = ({
   onToggleMute,
   onTestVoice,
   anomalyScore,
+  compact = false,
 }) => {
   // Détermination des styles et métadonnées selon l'état
   const config = {
@@ -40,8 +46,8 @@ export const AiPulseOrb: React.FC<AiPulseOrbProps> = ({
       textColor: 'text-sky-400',
     },
     attack: {
-      title: 'ALERTE CRITIQUE : ANOMALIE DE TRAFIC',
-      subtitle: 'Attaque détectée • Confinement et remédiation Zero-Touch',
+      title: 'ALERTE CRITIQUE : ATTAQUE DÉTECTÉE',
+      subtitle: 'Anomalie de trafic • Onde de choc d\'attaque active',
       badgeBg: 'bg-rose-500/20 text-rose-300 border-rose-500/40 animate-pulse',
       coreGradient: 'from-rose-500 via-red-600 to-red-700',
       glowShadow: 'shadow-[0_0_55px_rgba(244,63,94,0.7)]',
@@ -49,6 +55,17 @@ export const AiPulseOrb: React.FC<AiPulseOrbProps> = ({
       outerRingBorder: 'border-rose-400/30',
       animationClass: 'animate-orb-attack',
       textColor: 'text-rose-400',
+    },
+    confinement: {
+      title: 'CONFINEMENT & REMÉDIATION WAF',
+      subtitle: 'Source isolée • Filtrage WAF et Zero-Touch engagés',
+      badgeBg: 'bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse',
+      coreGradient: 'from-amber-400 via-orange-500 to-amber-600',
+      glowShadow: 'shadow-[0_0_55px_rgba(245,158,11,0.7)]',
+      ringBorder: 'border-amber-500/60',
+      outerRingBorder: 'border-amber-400/30',
+      animationClass: 'animate-orb-confinement',
+      textColor: 'text-amber-400',
     },
     rag: {
       title: 'RESTITUTION VOCALE RAG (CONSEIL)',
@@ -64,9 +81,13 @@ export const AiPulseOrb: React.FC<AiPulseOrbProps> = ({
   }[state];
 
   return (
-    <div className={`relative overflow-hidden rounded-2xl bg-zinc-950 text-white p-5 border transition-all duration-500 ${
+    <div className={`relative overflow-hidden rounded-2xl bg-zinc-950 text-white border transition-all duration-500 ${
+      compact ? 'p-3' : 'p-5'
+    } ${
       state === 'attack' 
         ? 'border-rose-500/50 shadow-[0_0_30px_rgba(225,29,72,0.2)]' 
+        : state === 'confinement'
+        ? 'border-amber-500/50 shadow-[0_0_30px_rgba(245,158,11,0.25)]'
         : state === 'rag' 
         ? 'border-indigo-500/40 shadow-[0_0_25px_rgba(99,102,241,0.15)]' 
         : 'border-zinc-800/80 shadow-inner'
@@ -86,6 +107,8 @@ export const AiPulseOrb: React.FC<AiPulseOrbProps> = ({
           <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold tracking-wider uppercase border ${config.badgeBg}`}>
             {state === 'attack' ? (
               <ShieldAlert className="w-3 h-3 text-rose-400 animate-bounce" />
+            ) : state === 'confinement' ? (
+              <ShieldCheck className="w-3 h-3 text-amber-400 animate-pulse" />
             ) : state === 'rag' ? (
               <Sparkles className="w-3 h-3 text-indigo-400 animate-spin" />
             ) : (
@@ -95,7 +118,13 @@ export const AiPulseOrb: React.FC<AiPulseOrbProps> = ({
           </span>
           {anomalyScore !== undefined && (
             <span className="hidden sm:inline-block font-mono text-[10px] text-zinc-400 bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800">
-              Score ML : <strong className={state === 'attack' ? 'text-rose-400' : 'text-emerald-400'}>{anomalyScore.toFixed(4)}</strong>
+              Score ML : <strong className={
+                state === 'attack' 
+                  ? 'text-rose-400' 
+                  : state === 'confinement' 
+                  ? 'text-amber-400' 
+                  : 'text-emerald-400'
+              }>{anomalyScore.toFixed(4)}</strong>
             </span>
           )}
         </div>
@@ -127,7 +156,7 @@ export const AiPulseOrb: React.FC<AiPulseOrbProps> = ({
       </div>
 
       {/* Cœur immersif : Orbe holographique & Visualiseur de flux */}
-      <div className="relative z-10 py-6 flex flex-col items-center justify-center">
+      <div className={`relative z-10 flex flex-col items-center justify-center ${compact ? 'py-3' : 'py-6'}`}>
         <div className="relative w-40 h-40 flex items-center justify-center">
           
           {/* Onde de choc d'attaque expansive */}
@@ -135,12 +164,17 @@ export const AiPulseOrb: React.FC<AiPulseOrbProps> = ({
             <div className="absolute inset-0 rounded-full border-2 border-rose-500/70 animate-orb-shockwave pointer-events-none" />
           )}
 
+          {/* Onde de confinement WAF */}
+          {state === 'confinement' && (
+            <div className="absolute inset-0 rounded-full border-2 border-amber-500/60 animate-orb-shockwave pointer-events-none" />
+          )}
+
           {/* Anneau extérieur tournant */}
           <div className={`absolute w-36 h-36 rounded-full border border-dashed ${config.outerRingBorder} animate-[spin_24s_linear_infinite]`} />
           
           {/* Anneau intermédiaire avec pulsation */}
           <div className={`absolute w-28 h-28 rounded-full border ${config.ringBorder} transition-all duration-700 ${
-            state === 'attack' ? 'scale-110 border-rose-500/60' : 'scale-100'
+            state === 'attack' ? 'scale-110 border-rose-500/60' : state === 'confinement' ? 'scale-105 border-amber-500/60' : 'scale-100'
           }`} />
 
           {/* Orbe Central avec dégradé sphérique */}
@@ -160,11 +194,13 @@ export const AiPulseOrb: React.FC<AiPulseOrbProps> = ({
         {/* Spectrogramme audio simulé (actif pendant la synthèse RAG ou l'alerte) */}
         <div className="mt-4 flex items-center justify-center gap-1 h-7">
           {Array.from({ length: 18 }).map((_, i) => {
-            const isActive = isSpeaking || state === 'attack';
+            const isActive = isSpeaking || state === 'attack' || state === 'confinement';
             const animDuration = `${0.35 + (i % 5) * 0.12}s`;
             const animDelay = `${(i * 0.05).toFixed(2)}s`;
             const barBg = state === 'attack' 
               ? 'bg-rose-500' 
+              : state === 'confinement'
+              ? 'bg-amber-400'
               : state === 'rag' 
               ? 'bg-indigo-400' 
               : 'bg-sky-500/40';
@@ -184,19 +220,23 @@ export const AiPulseOrb: React.FC<AiPulseOrbProps> = ({
         </div>
 
         {/* Légende didactique pour le jury */}
-        <p className="mt-3 text-xs text-zinc-400 text-center max-w-sm font-normal">
-          {config.subtitle}
-        </p>
+        {!compact && (
+          <p className="mt-3 text-xs text-zinc-400 text-center max-w-sm font-normal">
+            {config.subtitle}
+          </p>
+        )}
       </div>
 
       {/* Footer de télémétrie */}
-      <div className="relative z-10 pt-3 border-t border-zinc-900 flex items-center justify-between text-[11px] font-mono text-zinc-500">
-        <span className="flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-          <span>Web Speech API : {isMuted ? 'Silencieux' : 'Actif'}</span>
-        </span>
-        <span>Moteur IA : Isolation Forest + Ollama RAG</span>
-      </div>
+      {!compact && (
+        <div className="relative z-10 pt-3 border-t border-zinc-900 flex items-center justify-between text-[11px] font-mono text-zinc-500">
+          <span className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+            <span>Web Speech API : {isMuted ? 'Silencieux' : 'Actif'}</span>
+          </span>
+          <span>Moteur IA : Isolation Forest + Ollama RAG</span>
+        </div>
+      )}
     </div>
   );
 };

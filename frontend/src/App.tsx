@@ -10,6 +10,7 @@ import { Dashboard4Zones } from './components/Dashboard4Zones.tsx';
 import { FastApiExplorer } from './components/FastApiExplorer.tsx';
 import { SqlStudio } from './components/SqlStudio.tsx';
 import { AccountView } from './components/AccountView.tsx';
+import { RobotDisplayView } from './components/RobotDisplayView.tsx';
 import { 
   INITIAL_TRANSACTIONS, 
   processPayment, 
@@ -19,7 +20,38 @@ import {
 import { Transaction, PaymentRequest, HealthCheckResponse, WafStatusResponse } from './types/index.ts';
 import * as api from './utils/api.ts';
 
+/**
+ * Détection de la route /robot (indépendante du layout standard)
+ */
+function isRobotRoute(): boolean {
+  if (typeof window === 'undefined') return false;
+  const path = window.location.pathname.toLowerCase();
+  const hash = window.location.hash.toLowerCase();
+  const search = new URLSearchParams(window.location.search);
+  return (
+    path === '/robot' ||
+    path.startsWith('/robot/') ||
+    hash === '#/robot' ||
+    hash.startsWith('#/robot') ||
+    search.get('view') === 'robot' ||
+    search.has('robot')
+  );
+}
+
 export default function App() {
+  // Détection de la route autonome /robot pour écran HDMI Raspberry Pi
+  const [isRobot, setIsRobot] = useState<boolean>(isRobotRoute());
+
+  useEffect(() => {
+    const handleLocationChange = () => setIsRobot(isRobotRoute());
+    window.addEventListener('popstate', handleLocationChange);
+    window.addEventListener('hashchange', handleLocationChange);
+    return () => {
+      window.removeEventListener('popstate', handleLocationChange);
+      window.removeEventListener('hashchange', handleLocationChange);
+    };
+  }, []);
+
   const [activeTab, setActiveTab] = useState<'pay' | 'dashboard' | 'fastapi' | 'sql' | 'account'>('pay');
   const [manualDegraded, setManualDegraded] = useState(false);
   const [autoDegraded, setAutoDegraded] = useState(false);
@@ -193,6 +225,16 @@ export default function App() {
     return result;
   };
 
+  // ==============================================================================
+  // 🤖 ÉTAPE 2 & 3 : ROUTE AUTONOME /robot SANS LAYOUT (800x480 HDMI)
+  // ==============================================================================
+  if (isRobot) {
+    return <RobotDisplayView />;
+  }
+
+  // ==============================================================================
+  // DASHBOARD PRINCIPAL AVEC HEADER & LAYOUT STANDARD
+  // ==============================================================================
   return (
     <div className="min-h-screen bg-zinc-50/60 text-zinc-900 flex flex-col selection:bg-zinc-900 selection:text-white">
       <Header
