@@ -36,6 +36,7 @@ INTERVAL_S = float(os.environ.get("INTERVAL_S", "5"))
 WINDOW_S = int(os.environ.get("WINDOW_S", "30"))
 CONFIRMATIONS = int(os.environ.get("CONFIRMATIONS", "2"))  # anomalies consécutives avant d'alerter
 WARMUP_S = int(os.environ.get("WARMUP_S", "90"))  # pas d'alerte juste après un démarrage de la stack
+FORBIDDEN_MIN = int(os.environ.get("FORBIDDEN_MIN", "3"))  # refus 403 sans signature avant de parler d'intrusion
 STARTED = time.time()
 PORT = int(os.environ.get("PORT", "8010"))
 HEARTBEAT = "/tmp/ml-detector.heartbeat"
@@ -122,8 +123,12 @@ def diagnose(waf):
     # les requêtes du réseau app (10.77.20.x) viennent de la plateforme elle-même : générateur de trafic et
     # vérifications de la remédiation. Les vrais clients arrivent par le réseau edge (10.77.10.x).
     waf = [g for g in waf if not g[0].startswith("10.77.20.")]
-    suspicious = [g for g in waf if SCANNER_UA.search(g[4]) or g[3] == "403"]
-    if suspicious:
+    # intrusion : un outil d'attaque reconnu, ou plusieurs refus du WAF (un 403 isolé, comme le test de
+    # /api/docs de make check, n'en est pas une)
+    signed = [g for g in waf if SCANNER_UA.search(g[4])]
+    forbidden = [g for g in waf if g[3] == "403"]
+    suspicious = signed + [g for g in forbidden if g not in signed]
+    if signed or len(forbidden) >= FORBIDDEN_MIN:
         # signature = nom de l'outil d'attaque trouvé dans le User-Agent (ex. "sqlmap")
         tools = Counter(SCANNER_UA.search(g[4]).group(0).lower() for g in suspicious if SCANNER_UA.search(g[4]))
         ip = Counter(g[0] for g in suspicious).most_common(1)[0][0]
