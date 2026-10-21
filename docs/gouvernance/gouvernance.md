@@ -1,6 +1,6 @@
 # Dossier de gouvernance : continuité, risques et conformité
 
-> PROJECT RESILIENCE-ALPHA • Groupe G<n> • 20/10/2026 • Rédaction : Timéo (Lead Transformation & PMO)
+> PROJECT RESILIENCE-ALPHA • Groupe G4 • 20/10/2026 • Rédaction : Timéo (Lead Transformation & PMO)
 > BIA • PCA/PRA • EBIOS RM ateliers 2 à 5 • NIS2/DORA • Recommandations. Mesures réalisées sur la stack réelle.
 
 ## 0. L'essentiel en une page
