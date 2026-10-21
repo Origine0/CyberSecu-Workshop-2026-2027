@@ -1,6 +1,6 @@
 # EBIOS RM — Atelier 1 : ce qu'on protège, ce qu'on redoute
 
-> Groupe G<n> • 19/10/2026 • Rédaction : Timéo (Lead Transformation & PMO) • Base : `docs/architecture.md` (v2.1)
+> Groupe G4 • 19/10/2026 • Rédaction : Timéo (Lead Transformation & PMO) • Base : `docs/architecture.md` (v2.1)
 
 **Contexte :** une entreprise financière fictive fait tourner une plateforme de paiement en ligne. L'étude porte sur notre démonstrateur. Pas de vraies données bancaires, pas de numéros de carte.
 
