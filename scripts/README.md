@@ -21,7 +21,7 @@ Ce répertoire regroupe les outils opérationnels développés pour l'axe **Cybe
 Génère des requêtes POST régulières et conformes vers `/pay` pour simuler des utilisateurs réels.
 
 ```bash
-# Exécution par défaut en continu (cible http://localhost:8000/pay) :
+# Exécution par défaut en continu (cible http://localhost:8082/api/pay via le WAF) :
 python3 scripts/normal_traffic.py
 
 # Générer exactement 200 transactions saines pour le dataset d'Agathe :
