@@ -63,7 +63,7 @@ Les secrets de configuration du projet sont chiffrés avec SOPS et la clé `age`
 
 ```bash
 # Déchiffrement direct :
-sops -d .env.enc > .env
+sops -d secrets.enc.env > .env
 
 # Ou via le script d'automatisation :
 ./scripts/decrypt_secrets.sh
