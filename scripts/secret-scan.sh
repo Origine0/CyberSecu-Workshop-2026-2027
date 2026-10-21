@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Vérifie qu'aucun secret n'apparaît en clair dans ce qui part dans l'archive Code.zip (contenu du dernier commit),
+# Vérifie qu'aucun secret n'apparaît en clair dans les fichiers du dépôt (contenu du dernier commit),
 # et signale les secrets restés dans l'historique Git.
-# Sort en erreur si l'archive contiendrait un secret.
+# Sort en erreur si un secret est trouvé.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -15,15 +15,15 @@ ok()   { echo "  OK        $1"; }
 ko()   { echo "  BLOQUANT  $1"; bloquants=$((bloquants + 1)); }
 warn() { echo "  ATTENTION $1"; avertissements=$((avertissements + 1)); }
 
-# Contenu exact de l'archive : les fichiers du dernier commit (ni .env, ni node_modules, ni fichiers non suivis)
+# Fichiers du dernier commit, extraits dans un dossier temporaire (ni .env, ni node_modules, ni fichiers non suivis)
 git archive HEAD | tar -x -C "$WORK"
-[ -z "$(git status --porcelain --untracked-files=no)" ] || warn "modifications non commitées : elles ne seront pas dans l'archive"
-echo "Archive analysée : $(find "$WORK" -type f | wc -l) fichiers du commit $(git rev-parse --short HEAD)"
+[ -z "$(git status --porcelain --untracked-files=no)" ] || warn "modifications non commitées : elles ne sont pas analysées"
+echo "Fichiers analysés : $(find "$WORK" -type f | wc -l) fichiers du commit $(git rev-parse --short HEAD)"
 
 # fichiers qui contiennent volontairement des valeurs interdites (pour vérifier qu'elles sont refusées)
 EXCLUS='scripts/secret-scan.sh|scripts/security-check.sh'
 
-echo "== 1. gitleaks sur le contenu de l'archive"
+echo "== 1. gitleaks sur les fichiers du dépôt"
 if docker run --rm -v "$WORK:/src:ro" -v "$PWD/.gitleaksignore:/cfg/.gitleaksignore:ro" "$GITLEAKS" \
      dir /src --gitleaks-ignore-path /cfg/.gitleaksignore --redact --no-banner --log-level error; then
   ok "aucune clé, aucun jeton reconnu"
@@ -40,7 +40,7 @@ if [ -f .env ]; then
     fichiers=$(grep -rlF -- "$valeur" "$WORK" | sed "s#$WORK/##" | grep -vE "^($EXCLUS)$" | tr '\n' ' ')
     [ -n "$fichiers" ] && { ko "valeur de $cle présente dans : $fichiers"; trouve=1; }
   done < <(grep -E '^[A-Z_]+=' .env)
-  [ "$trouve" = 0 ] && ok "aucune valeur du .env dans l'archive"
+  [ "$trouve" = 0 ] && ok "aucune valeur du .env dans le dépôt"
 else
   warn ".env absent : contrôle des valeurs réelles impossible"
 fi
@@ -65,7 +65,7 @@ for f in .env.enc secrets.enc.env; do
   grep -q 'ENC\[AES256_GCM' "$WORK/$f" && ok "$f est chiffré (SOPS)" || ko "$f n'est pas chiffré"
 done
 
-echo "== 6. historique Git (non inclus dans l'archive, mais visible sur GitHub)"
+echo "== 6. historique Git (anciens commits, visibles sur GitHub)"
 for valeur in resilience_pass resilience-remediation-secret; do
   n=$(git log --all -S"$valeur" --format=%h | wc -l)
   [ "$n" -gt 0 ] && warn "\"$valeur\" présent dans $n commit(s) : à considérer comme public, changer la valeur réelle"
@@ -79,4 +79,4 @@ fi
 
 echo
 echo "Résultat : $bloquants bloquant(s), $avertissements avertissement(s)"
-[ "$bloquants" -eq 0 ] || { echo "Ne pas créer l'archive avant d'avoir corrigé les points bloquants."; exit 1; }
+[ "$bloquants" -eq 0 ] || { echo "Corriger les points bloquants avant le rendu."; exit 1; }

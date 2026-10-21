@@ -4,7 +4,7 @@ COMPOSE := docker compose
 REMED := docker compose exec -T remediation ansible-playbook /ansible/playbooks
 WAF_PORT ?= 8082
 
-.PHONY: help env pull up reload ps logs check restart chaos security-check secret-scan code-zip block unblock block-test restore down
+.PHONY: help env pull up reload ps logs check restart chaos security-check secret-scan block unblock block-test restore down
 
 help: ## affiche cette aide
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-15s %s\n", $$1, $$2}'
@@ -47,12 +47,8 @@ chaos: ## simule une panne puis la répare : make chaos [SERVICE=payment-api] [P
 security-check: ## vérifie l'exposition, l'isolation et les droits des proxys
 	@bash scripts/security-check.sh
 
-secret-scan: ## vérifie qu'aucun secret n'est en clair dans l'archive Code.zip (et signale l'historique Git)
+secret-scan: ## vérifie qu'aucun secret n'est en clair dans le dépôt (et signale l'historique Git)
 	@bash scripts/secret-scan.sh
-
-code-zip: secret-scan ## crée Workshop2026-M2-G4-Code.zip à partir du dernier commit, si le scan est propre
-	git archive --format=zip --prefix=Workshop2026-M2-G4-Code/ -o Workshop2026-M2-G4-Code.zip HEAD
-	@echo "Archive créée : Workshop2026-M2-G4-Code.zip ($$(du -h Workshop2026-M2-G4-Code.zip | cut -f1))"
 
 block: ## bloque une source dans le WAF : make block TYPE=user_agent VALUE=sqlmap (TYPE : ip, user_agent, ratelimit)
 	$(REMED)/block_source.yml -e block_type=$(TYPE) -e value=$(VALUE)

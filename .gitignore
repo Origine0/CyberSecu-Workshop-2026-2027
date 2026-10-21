@@ -55,5 +55,3 @@ keys.txt
 !*.enc.env
 !.env.enc
 !*.enc
-# archives de rendu
-Workshop2026-*.zip
