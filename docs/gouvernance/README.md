@@ -1,20 +1,14 @@
-# Gouvernance & Transformation — PROJECT RESILIENCE-ALPHA
+# Documents de gouvernance — PROJECT RESILIENCE-ALPHA
 
-Documents du pilier Gouvernance (sujet, section 3.5). Groupe G4. Rédaction : Timéo (Lead Transformation & PMO).
+Groupe G4. Rédaction : Timéo (Lead Transformation & PMO). Seuls les documents utiles aux rendus sont gardés.
 
-| Document | À quoi il sert | Date |
-|---|---|---|
-| [Architecture_Technique_Resilience-Alpha.pdf](Architecture_Technique_Resilience-Alpha.pdf) / [architecture.md](architecture.md) | **Architecture telle que construite (v3.2), lue dans le code** : schéma corrigé (un cadre = un réseau Docker, secrets SOPS), 17 conteneurs, 5 réseaux, 23 flux, sécurité en place, écarts avec la cible, points d'attention | 22/10 |
-| [Architecture_Cible_v2.1_Resilience-Alpha.pdf](Architecture_Cible_v2.1_Resilience-Alpha.pdf) / [architecture-cible-v2.1.md](architecture-cible-v2.1.md) | Architecture cible validée par le coach le 19/10 (13 conteneurs), référence pour les écarts | 19/10 |
-| [Architecture_et_EBIOS_Resilience-Alpha.pdf](Architecture_et_EBIOS_Resilience-Alpha.pdf) | Version courte : schéma tel que construit (v3.2) + EBIOS simplifié | 22/10 |
-| [Gouvernance_BIA_PCA-PRA_EBIOS_DORA_Resilience-Alpha.pdf](Gouvernance_BIA_PCA-PRA_EBIOS_DORA_Resilience-Alpha.pdf) / [gouvernance.md](gouvernance.md) | BIA, PCA/PRA, EBIOS RM ateliers 2 à 5, état des protections, NIS2/DORA, recommandations, avec les mesures réelles | 21/10 |
-| [EBIOS_RM_Atelier1_Resilience-Alpha.pdf](EBIOS_RM_Atelier1_Resilience-Alpha.pdf) / [ebios-rm.md](ebios-rm.md) | EBIOS RM atelier 1 : valeurs métier, événements redoutés | 19/10 |
-| [Plan_Workshop_Resilience-Alpha.pdf](Plan_Workshop_Resilience-Alpha.pdf) | Plan de projet : rôles, planning, rendus | 19/10 |
+| Dossier | Document | À quoi il sert dans les rendus | Date |
+|---|---|---|---|
+| 1_Architecture | Architecture_Technique_Resilience-Alpha.pdf | Architecture telle que construite (v3.2) : schéma, 17 conteneurs, 5 réseaux, 23 flux, sécurité, écarts avec la cible du 19/10 → **dossier** | 22/10 |
+| 1_Architecture | schema-archi.png | Le schéma seul, en image → **présentation (PPTX)** | 22/10 |
+| 2_Risques_EBIOS | EBIOS_RM_Atelier1_Resilience-Alpha.pdf | EBIOS RM atelier 1 : valeurs métier (VM1 à VM6), événements redoutés → **dossier** | 19/10 |
+| 3_Continuite_Conformite | Gouvernance_BIA_PCA-PRA_EBIOS_DORA_Resilience-Alpha.pdf | BIA, PCA/PRA, EBIOS ateliers 2 à 5, NIS2/DORA, recommandations, mesures réelles → **dossier** | 21/10 |
+| 4_Markdown_pour_RAG | architecture.md, ebios-rm.md, gouvernance.md | Mêmes contenus en texte, pour l'assistant RAG | 19-22/10 |
 
-**À savoir :**
-- L'architecture v3.2 (22/10) décrit le code de `main` au commit fcb1ba6 : blocage du WAF rechargé à chaud, riposte graduée au flood, page /robot, assistant RAG hors ligne (procedures.pdf + knowledge/).
-- L'architecture v3 décrit le code de `main` au 21/10 (commit bd635b8, avec la boucle de réparation automatique). Le plan d'adressage détaillé reste [`docs/plan-adressage.md`](../plan-adressage.md) ; un écart est signalé (flux payment-api → auth, qui n'existe pas dans le code).
-- Le dossier de gouvernance et l'architecture v3 décrivent le code de `main` au 21/10 (commit bd635b8, avec la boucle de réparation automatique), vérifié par des tests.
-- Les mesures de reprise ont été prises sur un poste de développement : à refaire sur le PC Hôte.
-
-**Pour l'assistant RAG :** les fichiers `.md` de ce dossier sont la base de connaissances de gouvernance. Le service `ai-api` doit les charger depuis le dépôt (copie dans l'image ou volume en lecture seule), pas par une copie manuelle dans le conteneur, qui disparaît au rebuild.
+Rendus visés : Workshop2026-M2-G4-Dossier.pdf (8 à 12 pages + tableau des contributions), -Pres.pptx, -VidChrono.mp4, -Code.zip.
+Les anciennes versions (architecture cible v2.1, version courte, plan de projet) sont dans l'historique Git (avant le 22/10).
