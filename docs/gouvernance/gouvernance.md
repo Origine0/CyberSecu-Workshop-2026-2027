@@ -66,12 +66,12 @@ Le **PCA** décrit comment le service **continue** pendant l'incident, le **PRA*
 
 | Scénario | Ce qui se passe | Réponse (automatique ou procédure) | Résultat mesuré | Couvert ? |
 |---|---|---|---|---|
-| S1 - Flood sur /api/pay (ER1) | Attaque depuis le PC Attaquant (red_attack.py --mode flood) | Limitation de débit dans l'API (40 requêtes / 2 s par client), puis automatiquement : détection ML → alerte dos → limitation dans le WAF | 90,2 % de l'attaque rejetée, service maintenu. 4/25 clients légitimes refusés. Boucle complète à chronométrer | ⚠️ Partiel |
+| S1 - Flood sur /api/pay (SC-01, ER1) | Attaque depuis le PC Attaquant (red_attack.py --mode flood) | Double WAF : limitation de débit du WAF applicatif (40 requêtes / 2 s par client), puis automatiquement : détection ML → alerte dos → limitation dans le WAF nginx | 90,2 % de l'attaque rejetée, service maintenu. 4/25 clients légitimes refusés. Boucle complète à chronométrer | ⚠️ Partiel |
 | S2 - Crash de l'API | Le processus de payment-api s'arrête | Docker relance le conteneur (restart: unless-stopped) | 0,2 s d'indisponibilité | ✅ Fait |
 | S3 - Crash de la base | Arrêt brutal de PostgreSQL | Docker relance PostgreSQL, rejeu du journal (WAL) | 0,3 s, 2 paiements refusés, 0 paiement accepté perdu | ✅ Fait |
 | S3b - Force brute sur un compte (ER3) | Des milliers de mots de passe testés sur /auth/login | Verrouillage après 5 échecs par compte, journalisé (LOGIN_LOCKED) | 35 tentatives sur 40 refusées (429) | ✅ Fait |
 | S4 - Doute sur l'intégrité des données | Après un incident, il faut prouver que les comptes sont justes | Playbook *restore_database* | 9,6 s, contrôles OK, paiement de preuve accepté | ✅ Fait |
-| S5 - Intrusion (outil d'attaque reconnaissable) | sqlmap, nikto… ou accès refusés (403) | Automatique : alerte intrusion → *block_source* (User-Agent) puis *restore_database* | Règle appliquée, mais le WAF redémarre (quelques secondes de coupure). Boucle à chronométrer | ⚠️ Partiel |
+| S5 - Intrusion (outil d'attaque reconnaissable, SC-02) | sqlmap, nikto… ou accès refusés (403) | Automatique : alerte intrusion → *block_source* (User-Agent) puis *restore_database* | Règle appliquée, mais le WAF redémarre (quelques secondes de coupure). Boucle à chronométrer | ⚠️ Partiel |
 | S6 - Service arrêté que Docker ne relance pas | Un service de la liste blanche n'est plus running ou healthy | Automatique : alerte crash → *restart_service* (seulement s'il est encore KO) | Mécanisme en place dans le code | ⏱️ À mesurer |
 | S7 - Perte du PC Hôte ou du disque | Matériel en panne, volume de données perdu | Aucune : pas de sauvegarde, pas de second PC | Non couvert | ❌ Absent |
 
@@ -119,7 +119,7 @@ Les playbooks tournent dans le conteneur *remediation*. Ils ne peuvent agir sur 
 
 ## 3. EBIOS RM : ateliers 2 à 5
 
-Version courte, reliée au démonstrateur. Elle reprend les sources de risque du rapport de Clara pour éviter les doublons.
+Version courte, reliée au démonstrateur. Elle reprend les valeurs métier (VM1 à VM4), les sources de risque (SR1 à SR3) et les scénarios (SC-01 à SC-04) du rapport de Clara, pour que les deux documents parlent la même langue.
 
 ### 3.1 Atelier 2 : qui pourrait attaquer, et pourquoi
 
@@ -143,17 +143,17 @@ Version courte, reliée au démonstrateur. Elle reprend les sources de risque du
 - **Scénario stratégique 2** (SR2 → ER2, ER3) : le fraudeur passe des paiements sans être authentifié ou rejoue une transaction.
 - **Scénario stratégique 3** (SR3 → ER4, ER6) : une dépendance piégée ou un initié vole les secrets, puis détourne le moteur de réparation.
 
-### 3.3 Atelier 4 : scénario opérationnel n°1, le flood (attaque de Clara)
+### 3.3 Atelier 4 : scénario opérationnel SC-01, DDoS applicatif L7 (attaque de Clara)
 
 | Étape | Ce que fait l'attaquant | Ce que fait la plateforme (constaté) |
 |---|---|---|
 | 1. Repérage | Trouve la page publique et la route /api/pay | Le WAF ne laisse passer que 3 routes de l'API (le reste répond 403) |
-| 2. Attaque | Lance red_attack.py --mode flood : 400 requêtes, 25 en parallèle, 690 requêtes/s | La limitation de débit répond 429 à 90,2 % des requêtes |
+| 2. Attaque | Lance red_attack.py --mode flood : 400 requêtes, 25 en parallèle, 690 requêtes/s | Le WAF applicatif répond 429 à 90,2 % des requêtes |
 | 3. Effet | Cherche à saturer l'API et la base | Le service reste disponible ; 4 clients légitimes sur 25 refusés au passage |
 | 4. Tentative de contournement | Change de fausse IP à chaque requête (en-tête X-Forwarded-For) | Sans effet : le WAF réécrit l'en-tête (20 requêtes sur 60 bloquées malgré 60 fausses IP) |
 | 5. Réparation automatique | — | Détection ML (2 analyses de 5 s) → alerte dos → playbook *block_source* (limitation dans le WAF) → paiement de test : **en place, à chronométrer** |
 
-**Vraisemblance : V3 (très vraisemblable)** : l'outil est simple. **Gravité résiduelle : G2** : l'attaque est absorbée, mais des clients légitimes sont gênés. Le scénario n°2 (fuzzing, SC-02 du rapport de Clara) est traité par la validation des données de l'API.
+**Vraisemblance : V3 (très vraisemblable)** : l'outil est simple. **Gravité résiduelle : G2** : l'attaque est absorbée, mais des clients légitimes sont gênés. Les autres scénarios du rapport de Clara sont traités ainsi : SC-02 (fuzzing) par la validation des données, SC-03 (fuite d'informations) par le masquage des erreurs, SC-04 (chaos) uniquement en test interne.
 
 ### 3.4 Atelier 5 : plan de traitement
 

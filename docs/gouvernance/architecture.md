@@ -142,10 +142,10 @@ Les numéros correspondent aux pastilles du schéma. Tout flux absent est interd
 
 | Mesure | Où dans le code | État |
 |---|---|---|
-| Un seul point d'entrée, liste blanche de routes (/api/docs, /api/metrics, /api/waf/block → 403) | infra/placeholders/waf/default.conf | ✅ Fait |
+| Double WAF, niveau 1 (nginx) : point d'entrée unique, liste blanche de routes (/api/docs, /api/metrics, /api/waf/block → 403) | infra/placeholders/waf/default.conf | ✅ Fait |
 | IP source non falsifiable : X-Forwarded-For forcé à l'IP vue par le WAF | default.conf (proxy_set_header … $remote_addr) | ✅ Fait |
 | Liste de blocage dynamique (IP, User-Agent, limitation) écrite par Ansible | ansible/roles/waf_blocklist + volume waf-blocklist | ✅ Fait |
-| Limitation de débit : 40 requêtes / 2 s par client sur /pay | backend/app/waf.py | ✅ Fait |
+| Double WAF, niveau 2 (applicatif, dans payment-api) : limitation de débit, 40 requêtes / 2 s par client sur /pay | backend/app/waf.py | ✅ Fait |
 | Routes /waf/block et /waf/unblock protégées par jeton (REMEDIATION_TOKEN) | backend/app/main.py | ✅ Fait |
 | simulate_failure ignoré sauf si CHAOS_MODE_ENABLED=true côté serveur | backend/app/services.py | ✅ Fait |
 | Authentification : mots de passe scrypt, verrouillage après 5 échecs par compte, jeton JWT HS256, débit du solde | backend-auth/app/main.py, backend/app/auth.py | ✅ Fait |
@@ -163,7 +163,7 @@ Les numéros correspondent aux pastilles du schéma. Tout flux absent est interd
 |---|---|---|---|
 | Nombre de services | 13 conteneurs | 17 services | Ajout de traffic-gen, cadvisor, docker-stats-exporter, 2 proxys Docker ; ml-detector séparé |
 | Réseaux | 2 (front, back) | 5 zones (edge, app, data, monitoring, remediation) | Plus fin que prévu : meilleure isolation |
-| WAF | Nginx + ModSecurity (OWASP CRS), port 80 | nginx : liste blanche + liste de blocage, port 8082 | Pas de règles OWASP : le filtrage applicatif est dans payment-api (waf.py) |
+| WAF | Nginx + ModSecurity (OWASP CRS), port 80 | nginx : liste blanche + liste de blocage, port 8082 | Double WAF : nginx (liste blanche, blocage) + WAF applicatif dans payment-api (waf.py) ; pas de règles OWASP |
 | Détection + remédiation | Un service resilience-engine qui lit Prometheus | ml-detector + remediation (séparés), le détecteur lit Loki | Boucle en place depuis le 20/10 au soir ; séparation plus sûre (le détecteur ne touche pas à Docker) |
 | Assistant IA | Conteneurs assistant + ollama | ai-api (ML + RAG) + Ollama hors Docker | Ollama sur le PC IA (.60) : PC IA utilisé, contrairement à la cible |
 | Authentification | auth, JWT RS256 (clé privée isolée) | auth, JWT HS256 (secret partagé) | payment-api détient aussi le secret de signature |
