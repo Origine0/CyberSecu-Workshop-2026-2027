@@ -298,6 +298,8 @@ services:
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_SECURITY_DISABLE_GRAVATAR: "true"
+      # autorise le rafraîchissement à la seconde (défaut Grafana : 5 s minimum) pour voir l'attaque en direct
+      GF_DASHBOARDS_MIN_REFRESH_INTERVAL: "1s"
       # pas d'internet pendant la démo
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"

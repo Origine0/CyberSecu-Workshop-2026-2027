@@ -25,7 +25,7 @@ BLOCKLIST_DIR = os.environ.get("WAF_BLOCKLIST_DIR", "/blocklist")
 COOLDOWN_S = int(os.environ.get("COOLDOWN_S", "90"))   # une action par service et par type sur cette durée
 MAX_ACTIONS = int(os.environ.get("MAX_ACTIONS_10MIN", "3"))  # au-delà, on arrête d'agir (évite les boucles)
 PLAYBOOK_TIMEOUT_S = 240
-ESCALATE_AFTER_S = int(os.environ.get("ESCALATE_AFTER_S", "20"))  # flood qui continue malgré la limitation -> blocage
+ESCALATE_AFTER_S = int(os.environ.get("ESCALATE_AFTER_S", "8"))  # flood qui continue malgré la limitation -> blocage
 # signatures jamais bloquées : navigateurs (tous les visiteurs) et services de la plateforme
 PROTECTED_AGENTS = {"mozilla", "resilience-traffic-gen", "ansible-httpget"}
 
@@ -86,12 +86,14 @@ def plan_for(alert):
     if kind == "crash":
         # revérifié juste avant d'agir : un service revenu entre-temps n'est pas redémarré
         return [("restart_service", {"service": service}, True)]
-    if kind == "dos" and alert.get("escalate"):
-        # la limitation n'a pas suffi : on bloque la signature de l'attaquant (403), les autres clients passent
-        return [("block_source", {"block_type": "user_agent", "value": alert["user_agent"]}, False),
-                ("restart_service", {"service": service}, True)]
     if kind == "dos":
-        # confinement d'abord (limitation de débit dans le WAF), puis reprise du service s'il est tombé
+        ua = alert.get("user_agent") or ""
+        # signature reconnaissable (ex. python-requests) : on la bloque directement (403), les navigateurs passent.
+        # escalate = la limitation posée plus tôt n'a pas suffi et une signature est apparue.
+        if alert.get("escalate") or blockable_agent(ua):
+            return [("block_source", {"block_type": "user_agent", "value": ua}, False),
+                    ("restart_service", {"service": service}, True)]
+        # pas de signature distincte (attaquant qui imite un navigateur) : limitation de débit, puis reprise si besoin
         return [("block_source", {"block_type": "ratelimit"}, False), ("restart_service", {"service": service}, True)]
     # intrusion : bloquer la signature (ou l'IP), puis contrôler la base et relancer l'API
     steps = []

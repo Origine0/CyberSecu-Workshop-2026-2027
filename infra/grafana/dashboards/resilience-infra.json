@@ -6,9 +6,9 @@
     "infra"
   ],
   "timezone": "browser",
-  "refresh": "5s",
+  "refresh": "1s",
   "time": {
-    "from": "now-15m",
+    "from": "now-5m",
     "to": "now"
   },
   "schemaVersion": 39,
@@ -381,7 +381,7 @@
         "w": 24,
         "h": 8
       },
-      "interval": "5s",
+      "interval": "1s",
       "targets": [
         {
           "refId": "A",
@@ -389,7 +389,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum by (status) (rate({service=\"waf\"} |= \"HTTP/\" != \"/healthz\" | pattern `<_> - <_> [<_>] \"<method> <path> <_>\" <status> <_>` | status != \"\" [10s]))",
+          "expr": "sum by (status) (rate({service=\"waf\"} |= \"HTTP/\" != \"/healthz\" | pattern `<_> - <_> [<_>] \"<method> <path> <_>\" <status> <_>` | status != \"\" [5s]))",
           "legendFormat": "{{status}}"
         }
       ],
@@ -1456,5 +1456,16 @@
         "h": 8
       }
     }
-  ]
+  ],
+  "timepicker": {
+    "refresh_intervals": [
+      "1s",
+      "2s",
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m"
+    ]
+  }
 }
