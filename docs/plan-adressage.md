@@ -130,12 +130,12 @@ test de port TCP (§ 1).
 | `payment-api` | 8000 | non | `waf`, `prometheus` (`/metrics`) |
 | `auth` | 8001 | non | `waf`, `payment-api` |
 | `postgres` (PostgreSQL 16) | 5432 | non | `payment-api` |
-| `prometheus` | 9090 | non | `grafana`, `ml-detector` |
+| `prometheus` | 9090 | non | `grafana` (datasource) |
 | `grafana` | 3000 | oui → hôte 3000 | Équipe sur le Wi-Fi |
 | `loki` | 3100 | non | `promtail` (push), `grafana`, `ml-detector` (lecture), `prometheus` (métriques) |
 | `promtail` | 9080 | non | `prometheus` (métriques propres) |
 | `cadvisor` | 8080 | non | `prometheus` |
-| `docker-stats-exporter` | 9105 | non | `prometheus` |
+| `docker-stats-exporter` | 9105 | non | `prometheus`, `ml-detector` (état des conteneurs) |
 | `ml-detector` | 8010 | non | `prometheus` (métriques) |
 | `remediation` | 8020 | non | `ml-detector` (déclenchement), `prometheus` (métriques) |
 | `socket-proxy-ro` | 2375 | non | `promtail`, `cadvisor`, `docker-stats-exporter` |
