@@ -9,7 +9,7 @@ Réseau du labo, ports exposés et réseaux Docker. À mettre à jour à chaque 
 | SSID | `RESILIENCE-G4` (point d'accès mobile Windows sur le PC Hôte) |
 | Sous-réseau | `192.168.137.0/24` |
 | Passerelle / DNS | `192.168.137.1` (PC Hôte, partage de connexion Windows) |
-| Accès Internet | Partage USB du téléphone de Mélanie vers le PC Hôte (interface « Ethernet »), séparé de la carte Wi-Fi qui diffuse le hotspot. Pas d'Internet pendant la démo : images Docker et modèles Ollama téléchargés à l'avance |
+| Accès Internet | Partage USB du téléphone de Mélanie vers le PC Hôte (interface « Ethernet »), séparé de la carte Wi-Fi qui diffuse le hotspot. Par précaution (le sujet ne garantit pas de connexion le jour J), la plateforme fonctionne sans Internet : images Docker et modèles Ollama téléchargés à l'avance |
 
 | Membre | Rôle | Machine | IP |
 |---|---|---|---|
