@@ -9,12 +9,12 @@ Réseau du labo, ports exposés et réseaux Docker. À mettre à jour à chaque 
 | SSID | `RESILIENCE-G4` (point d'accès mobile Windows sur le PC Hôte) |
 | Sous-réseau | `192.168.137.0/24` |
 | Passerelle / DNS | `192.168.137.1` (PC Hôte, partage de connexion Windows) |
-| Accès Internet | Connexion propre au PC Hôte (partage USB d'un téléphone ou Ethernet, pas le Wi-Fi utilisé par le hotspot) → hotspot. Pas d'Internet pendant la démo : images Docker et modèles Ollama téléchargés à l'avance |
+| Accès Internet | Partage USB du téléphone de Mélanie vers le PC Hôte (interface « Ethernet »), séparé de la carte Wi-Fi qui diffuse le hotspot. Pas d'Internet pendant la démo : images Docker et modèles Ollama téléchargés à l'avance |
 
 | Membre | Rôle | Machine | IP |
 |---|---|---|---|
-| Clara | Cyber | PC Hôte (Windows + WSL2 + Docker Desktop), crée le hotspot | `192.168.137.1` |
-| Mélanie | Infra | PC Attaquant | `192.168.137.50` |
+| Mélanie | Infra | PC Hôte (Windows + WSL2 + Docker Desktop), crée le hotspot | `192.168.137.1` |
+| Clara | Cyber | PC Attaquant | `192.168.137.50` |
 | Agathe | IA | PC IA (Ollama) | `192.168.137.60` |
 | Antoine | Dev | Portable équipe | `192.168.137.101` |
 | Timéo | Transfo / PMO | Portable équipe | `192.168.137.102` |
@@ -68,10 +68,8 @@ curl -s -o /dev/null -w '%{http_code}\n' --connect-timeout 3 http://192.168.137.
 
 Seuls deux ports sont publiés sur le PC Hôte. Tout le reste est interne à Docker.
 
-Pourquoi 8082 et pas 8080 ? Sur le premier PC Hôte, le port 8080 était pris par Oracle Database (`TNSLSNR`)
-et le 8081 par Apache (`httpd`). On garde 8082 sur le PC Hôte actuel : les scripts d'attaque, les tests et la
-documentation l'utilisent. Le WAF écoute toujours sur 8080 à l'intérieur de Docker, mais il est publié
-sur 8082 côté Wi-Fi. Ce port se règle avec la variable `WAF_PORT` du `.env`.
+Le WAF écoute sur 8080 à l'intérieur de Docker et est publié sur 8082 côté Wi-Fi
+(réglable avec la variable `WAF_PORT` du `.env`).
 
 | Port hôte | Service | Rôle | Qui peut y accéder |
 |---|---|---|---|
@@ -111,8 +109,8 @@ Choix de l'équipe : on ne modifie pas le pare-feu Windows du PC Hôte.
   défini uniquement dans le `.env` local (non versionné), chiffré dans le dépôt avec SOPS + age (`secrets.enc.env`).
 - Le reste n'est pas exposé de toute façon : aucun autre service n'a de port publié.
 
-Règle ICMP créée sur le premier PC Hôte pour autoriser le ping (sans restriction d'adresse). Sur le PC Hôte actuel, elle
-n'existe que si son propriétaire la crée ; sans elle, le ping échoue mais les tests de port restent valables :
+Règle ICMP créée sur le PC Hôte pour autoriser le ping (sans restriction d'adresse) ; sans elle le ping échoue,
+mais les tests de port restent la vraie preuve de connectivité :
 
 ```powershell
 New-NetFirewallRule -DisplayName "ICMP labo" -Protocol ICMPv4 -IcmpType 8 -Direction Inbound -Action Allow
@@ -283,7 +281,7 @@ Ping : indicatif seulement. Ports : la vraie preuve.
 
 | Depuis ↓ / Test → | Ping `.1` | `.1:8082` (attendu ✅) | `.1:3000` | `.1:5432` (attendu ❌) | `.1:8000` (attendu ❌) | Ping des autres PC |
 |---|---|---|---|---|---|---|
-| Mélanie `.50` (Attaquant) | | | attendu : port ouvert, login refusé | | | |
+| Clara `.50` (Attaquant) | | | attendu : port ouvert, login refusé | | | |
 | Agathe `.60` (IA) | | | attendu ✅ | | | |
 | Antoine `.101` | | | attendu ✅ | | | |
 | Timéo `.102` | | | attendu ✅ | | | |
