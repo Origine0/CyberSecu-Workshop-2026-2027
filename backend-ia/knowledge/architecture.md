@@ -1,221 +1,185 @@
-# Architecture technique — PROJECT RESILIENCE-ALPHA
+# Architecture technique telle que construite — PROJECT RESILIENCE-ALPHA
 
-> Groupe G<n> • Version 2.1 (simplifiée) du 19/10/2026 • Rédaction : Timéo (Lead Transformation & PMO) • Statut : à valider par le coach
-
-## 1. Vue d'ensemble
-
-**2 PC, 13 conteneurs, 1 seul port ouvert au réseau.** Tout tourne sur le PC Hôte avec un seul `docker compose up`. Le PC Attaquant (script Python) ne voit que le WAF. Les secrets sont chiffrés avec SOPS.
+> Groupe G4 • v3.2 (telle que construite) • code main fcb1ba6 • 22/10/2026 • Rédaction : Timéo (Lead Transformation & PMO)
+> Source : `docker-compose.yml` et le code du dépôt. La cible validée le 19/10 (v2.1) et les écarts sont en section 7.
 
 ```mermaid
 flowchart LR
-    ATK["PC Attaquant<br/>script Python<br/>192.168.137.50"]
-    NAV["Navigateur client"]
-
-    subgraph HOTE["PC Hôte — 192.168.137.1 — Docker Desktop (WSL2)"]
-        subgraph APP["Application"]
-            WAF["waf<br/>Nginx + ModSecurity :80"]
-            WEB["web<br/>Next.js + Tailwind :3000<br/>/ et /dashboard"]
-            AUTH["auth<br/>FastAPI :8001"]
-            PAY["payment<br/>FastAPI :8000"]
-            DB["db<br/>PostgreSQL :5432"]
-        end
-        subgraph SUP["Supervision"]
-            PROMTAIL["promtail"]
-            LOKI["loki :3100"]
-            PROM["prometheus :9090"]
-            GRAF["grafana (vue SOC)<br/>127.0.0.1:3001"]
-        end
-        subgraph RES["Résilience"]
-            ENG["resilience-engine :8020<br/>1. détection ML<br/>2. remédiation Ansible<br/>3. transaction test"]
-            PROXY["docker-proxy :2375"]
-        end
-        subgraph IA["Assistant IA"]
-            ASSIST["assistant<br/>LangChain + Streamlit<br/>127.0.0.1:8501"]
-            OLLAMA["ollama<br/>Qwen 2.5 1.5B :11434"]
-        end
-        subgraph SEC["Secrets (SOPS + age)"]
-            SOPS["secrets.enc.yaml<br/>chiffré dans Git<br/>déchiffré par Ansible"]
-        end
+    NAV["Navigateurs Wi-Fi"] -->|"1 :8082"| WAF
+    ATK["PC Attaquant .50"] -->|"2 attaque"| WAF
+    EQ["Postes équipe"] -->|"15 :3000"| GRAF
+    subgraph HOTE["PC Hôte 192.168.137.1 — 17 services"]
+      subgraph edge
+        WAF["waf (nginx)"]
+        GRAF["grafana"]
+        AI["ai-api (ML + RAG)"]
+      end
+      subgraph app
+        FRONT["frontend"]
+        PAY["payment-api"]
+        AUTH["auth"]
+        TG["traffic-gen"]
+      end
+      subgraph data
+        PG["postgres"]
+      end
+      subgraph monitoring
+        PROM["prometheus"]
+        LOKI["loki"]
+        PT["promtail"]
+        CAD["cadvisor"]
+        DSE["docker-stats-exporter"]
+        SPRO["socket-proxy-ro"]
+        ML["ml-detector (Isolation Forest)"]
+      end
+      subgraph remediation
+        REM["remediation (moteur + Ansible)"]
+        SPRE["socket-proxy-remed"]
+      end
     end
-
-    NAV -->|"1 HTTP 80"| WAF
-    ATK -->|"2 HTTP 80 (attaque)"| WAF
-    WAF -->|"3"| WEB & AUTH & PAY
-    AUTH & PAY -->|"4 TCP 5432"| DB
-    PROMTAIL -.->|"5"| LOKI
-    PROM -.->|"6 /metrics"| AUTH & PAY & ENG
-    GRAF -.->|"7"| PROM & LOKI
-    ENG -->|"8 lecture métriques"| PROM
-    ENG -->|"9 API Docker filtrée"| PROXY
-    ENG -->|"10 blocage IP + transaction test"| WAF
-    WEB -->|"11 GET /status"| ENG
-    ASSIST -.->|"12"| OLLAMA
-    SOPS ==>|"13 /run/secrets"| DB & AUTH & PAY & ENG & GRAF
+    OLL["Ollama (PC IA .60)"]
+    WAF -->|"3"| FRONT & PAY & AUTH
+    FRONT -->|"4"| WAF
+    TG -->|"5"| WAF
+    WAF -->|"6 /ai"| AI
+    PAY -->|"8"| PG
+    AUTH -->|"9"| PG
+    PROM -.->|"11"| PAY & AUTH
+    PT -.->|"12"| LOKI
+    GRAF -.->|"13"| PROM & LOKI
+    PT & CAD & DSE -.->|"14"| SPRO
+    ML -->|"16 journaux"| LOKI
+    ML -->|"17 alerte + jeton"| REM
+    REM -->|"18"| SPRE
+    REM -->|"19 blocklist + test"| WAF
+    REM -->|"20 lecture"| PG
+    AI -->|"21"| OLL
+    PAY -.->|"22 /status"| REM
 ```
 
-## 2. Les machines
+## 1. Machines et réseau du labo
 
-| Machine                                                                      | Adresse IP                                        | Ce qui y tourne                                                                                                                       | Responsable |
-| ---------------------------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
-| PC Hôte (Windows, Docker Desktop + WSL2, 16 Go RAM min.)                    | **192.168.137.1** (imposée par le hotspot) | Les 13 conteneurs + le point d'accès « RESILIENCE-G<n> » + la clé de déchiffrement SOPS                                      | Mélanie    |
-| PC Attaquant (n'importe quel OS avec Python 3, environnement virtuel isolé) | **192.168.137.50** (fixe)                   | Deux scripts Python : `traffic.py` (trafic légitime) et `attack.py` (attaque). Seule cible autorisée : `http://192.168.137.1` | Clara       |
-| *PC IA (facultatif, plan B)*                                               | *192.168.137.20*                                | *Seulement si le PC Hôte manque de RAM : on y déplace le conteneur ollama*                                                        | Agathe      |
+| Machine | Adresse IP | Rôle | Responsable |
+|---|---|---|---|
+| **PC Hôte** (Windows + WSL2 + Docker Desktop) | **192.168.137.1** | Point d'accès Wi-Fi **RESILIENCE-G4** + les 17 services Docker | Mélanie |
+| **PC Attaquant** | **192.168.137.50** | Scripts Python de trafic et d'attaque (scripts/red_attack.py, normal_traffic.py) | Clara |
+| **PC IA** | 192.168.137.60 | Ollama (modèle qwen2.5:1.5b) pour l'assistant RAG, hors Docker | Agathe |
+| Postes équipe | 192.168.137.101 / .102 | Développement, accès à Grafana | Antoine, Timéo |
 
-## 3. Les 13 conteneurs
+IP fixes configurées à la main sur chaque PC (le hotspot Windows ne permet pas de réservation DHCP). Détails et commandes : *docs/plan-adressage.md*.
 
-| Bloc         | Conteneur                   | Techno                           | Port  | Accessible depuis                                              | Rôle                                                           | Resp.             |
-| ------------ | --------------------------- | -------------------------------- | ----- | -------------------------------------------------------------- | --------------------------------------------------------------- | ----------------- |
-| Application  | **waf**               | Nginx + ModSecurity (OWASP CRS)  | 80    | **Réseau (0.0.0.0:80)**                                 | Seule porte d'entrée : filtre, limite le débit, bannit des IP | Clara             |
-| Application  | **web**               | Next.js + Tailwind               | 3000  | Via le WAF (`/`) • `/dashboard` en local (127.0.0.1:3000) | Page de paiement + dashboard 4 zones                            | Antoine           |
-| Application  | **auth**              | FastAPI                          | 8001  | Via le WAF (`/api/auth`)                                     | Connexion, jeton JWT                                            | Antoine           |
-| Application  | **payment**           | FastAPI                          | 8000  | Via le WAF (`/api/pay`)                                      | Transactions, `/health`, `/metrics`                         | Antoine           |
-| Application  | **db**                | PostgreSQL                       | 5432  | Interne                                                        | Données fictives                                               | Antoine           |
-| Supervision  | **prometheus**        | Prometheus                       | 9090  | Interne                                                        | Métriques toutes les 5 s                                       | Mélanie          |
-| Supervision  | **loki**              | Loki                             | 3100  | Interne                                                        | Journaux centralisés                                           | Mélanie          |
-| Supervision  | **promtail**          | Promtail                         | —    | Interne                                                        | Envoie les journaux de tous les conteneurs à Loki              | Mélanie          |
-| Supervision  | **grafana**           | Grafana                          | 3000  | Local (127.0.0.1:3001)                                         | Tableaux de bord + vue SOC (fonction SIEM)                      | Mélanie / Clara  |
-| Résilience  | **resilience-engine** | FastAPI + scikit-learn + Ansible | 8020  | Interne                                                        | Détecte (ML), répare (Ansible), vérifie (transaction test)   | Agathe + Mélanie |
-| Résilience  | **docker-proxy**      | tecnativa/docker-socket-proxy    | 2375  | Interne                                                        | Seule voie vers Docker, limitée au redémarrage                | Mélanie          |
-| Assistant IA | **ollama**            | Ollama + Qwen 2.5 1.5B           | 11434 | Interne                                                        | Modèle de langage local                                        | Agathe            |
-| Assistant IA | **assistant**         | LangChain + Streamlit            | 8501  | Local (127.0.0.1:8501)                                         | Répond aux opérateurs à partir de `docs/`                  | Agathe            |
+## 2. Ports publiés sur le PC Hôte
 
-- **Réseaux Docker** : `front` et `back` (`back` en `internal: true`). db, prometheus, loki, promtail et docker-proxy ne sont que sur `back`.
-- **Playbooks Ansible** : `deploy.yml` (tout installer), `reset.yml` (remettre la démo à zéro), `remediate.yml` (actions de réparation, lancées par resilience-engine).
+| Port hôte | Service | Joignable depuis | Protection |
+|---|---|---|---|
+| **8082** | waf (point d'entrée unique) | Tout le Wi-Fi, y compris l'attaquant | Liste blanche de routes, liste de blocage, IP source non falsifiable |
+| **3000** | grafana (supervision) | Tout le Wi-Fi (règle Docker Desktop du pare-feu) | Compte obligatoire, pas d'accès anonyme ni d'inscription |
+| 127.0.0.1:8001 | ai-api | PC Hôte uniquement | Invisible depuis le Wi-Fi |
+| — | postgres, payment-api, auth, prometheus, loki, remediation… | Jamais | Aucune directive ports: dans le compose |
 
-## 4. Gestion des secrets avec SOPS (obligatoire)
+## 3. Réseaux Docker (5 zones)
 
-Les secrets ne sont **jamais** en clair dans Git ni dans des variables d'environnement. Ils sont chiffrés avec SOPS, déchiffrés uniquement sur le PC Hôte au déploiement, puis donnés **à chaque service qui en a besoin, et à lui seul**, sous forme de fichier. Responsable : Clara.
+| Réseau | Sous-réseau | Interne | Membres |
+|---|---|---|---|
+| **edge** | 10.77.10.0/24 | non | waf, grafana, ai-api (seul réseau avec une sortie ; le waf y joint ai-api) |
+| **app** | 10.77.20.0/24 | oui | waf, frontend, payment-api, auth, traffic-gen, prometheus, remediation |
+| **data** | 10.77.30.0/24 | oui | postgres, payment-api, auth, remediation |
+| **monitoring** | 10.77.40.0/24 | oui | prometheus, grafana, loki, promtail, cadvisor, docker-stats-exporter, socket-proxy-ro, ml-detector, remediation |
+| **remediation** | 10.77.50.0/24 | oui | remediation, socket-proxy-remed (seul accès au redémarrage des conteneurs) |
 
-| Secret                                     | Reçu par                 | Fichier dans le conteneur               | Pourquoi                                                    |
-| ------------------------------------------ | ------------------------- | --------------------------------------- | ----------------------------------------------------------- |
-| Mot de passe administrateur PostgreSQL     | db                        | `/run/secrets/db_admin_password`      | Initialisation de la base uniquement                        |
-| Mot de passe du compte SQL `auth_svc`    | auth                      | `/run/secrets/db_auth_password`       | Accès limité à la table `users`                        |
-| Mot de passe du compte SQL `payment_svc` | payment                   | `/run/secrets/db_payment_password`    | Accès limité aux tables `accounts` et `transactions`  |
-| **Clé privée JWT** (RS256)         | **auth uniquement** | `/run/secrets/jwt_private_key`        | Seul auth peut **signer** un jeton                    |
-| Clé publique JWT                          | payment                   | `/run/secrets/jwt_public_key`         | payment peut **vérifier** un jeton, pas en fabriquer |
-| Mot de passe du compte de test             | resilience-engine         | `/run/secrets/test_account_password`  | Transaction test après remédiation                        |
-| Mot de passe admin Grafana                 | grafana                   | `/run/secrets/grafana_admin_password` | Accès à la vue SOC                                        |
+## 4. Les 17 services
 
-**Le circuit, étape par étape :**
+| Service | Techno (code) | Port | Réseaux | Rôle | État | Resp. |
+|---|---|---|---|---|---|---|
+| **waf** | nginx-unprivileged 1.28 | 8080 | edge, app | Liste blanche : /, /api/{pay,health,transactions,waf/status}, /auth/*, /ai/* ; liste de blocage rechargée à chaud, sans redémarrage (infra/waf-reload) | ✅ Fait | Mélanie, Clara |
+| **frontend** | React + Vite + Tailwind | 3000 | app | Pages / (paiement, compte), /dashboard et /robot (écran du robot) ; appelle /api, /auth, /ai via le waf | ✅ Fait | Antoine |
+| **payment-api** | FastAPI (backend/) | 8000 | app, data | Paiements, débit du solde si client authentifié, limite de débit intégrée, /metrics ; lit l'état de remediation pour le dashboard | ✅ Fait | Antoine, Clara |
+| **auth** | FastAPI (backend-auth/) | 8001 | app, data | Inscription, connexion (mots de passe scrypt, verrouillage après 5 échecs), JWT HS256, solde, dépôt, compte administrateur | ✅ Fait | Antoine |
+| **postgres** | PostgreSQL 16.10 | 5432 | data | Comptes, transactions, journal d'audit ; rôle remediation_ro en lecture ; jamais publié | ✅ Fait | Antoine, Mélanie |
+| **traffic-gen** | Python | — | app | Trafic normal : 1 paiement toutes les 2 s via le waf | ✅ Fait | Mélanie |
+| **prometheus** | Prometheus 3.5 | 9090 | app, monitoring | Collecte des métriques toutes les 15 s (5 s pour ml-detector et remediation) | ✅ Fait | Mélanie |
+| **loki** | Loki 3.5 | 3100 | monitoring | Centralisation des journaux | ✅ Fait | Mélanie |
+| **promtail** | Promtail 3.5 | 9080 | monitoring | Lit les journaux des conteneurs via socket-proxy-ro et les envoie à Loki | ✅ Fait | Mélanie |
+| **grafana** | Grafana 12.1 | 3000 | edge, monitoring | Tableaux de bord, vue SOC ; publié sur le Wi-Fi, compte obligatoire | ✅ Fait | Mélanie, Clara |
+| **cadvisor** | cAdvisor 0.52 | 8080 | monitoring | Métriques des conteneurs | ✅ Fait | Mélanie |
+| **docker-stats-exporter** | Python | 9105 | monitoring | CPU, mémoire, santé et redémarrages par conteneur (Docker Desktop) | ✅ Fait | Mélanie |
+| **socket-proxy-ro** | tecnativa 0.4.1 | 2375 | monitoring | Accès Docker en lecture seule pour la supervision | ✅ Fait | Mélanie |
+| **ai-api** | FastAPI, scikit-learn, LangChain, FAISS | 8000 | edge | Assistant RAG LangChain + FAISS (procedures.pdf + dossier knowledge/), hors ligne, utilisateur non-root ; entraînement du modèle Isolation Forest ; aucun lien avec remediation | ✅ Fait | Agathe |
+| **ml-detector** | Python, scikit-learn (infra/ml-detector) | 8010 | monitoring | Toutes les 5 s : mesure 30 s de journaux (Loki), juge avec le modèle Isolation Forest, identifie la cause et alerte le moteur ; ne peut rien redémarrer | ✅ Fait | Mélanie, Agathe |
+| **remediation** | Python + Ansible (infra/remediation-engine) | 8020 | monitoring, remediation, app, data | Reçoit les alertes (POST /alerts, jeton), lance les playbooks de la liste blanche, paiement de test ; flood : blocage de la signature de l'outil, sinon limitation de débit ; garde-fous (90 s, 3 actions / 10 min) ; GET /status en lecture | ✅ Fait | Mélanie |
+| **socket-proxy-remed** | wollomatic 1.13 | 2375 | remediation | N'autorise que la lecture et le redémarrage, depuis remediation seulement | ✅ Fait | Mélanie |
 
-1. **Chiffrement** : tous les secrets sont dans `secrets.enc.yaml`, chiffré avec SOPS et une clé **age**. Ce fichier chiffré est commité dans Git.
-2. **Clé de déchiffrement** : la clé privée age n'existe que sur le PC Hôte (`~/.config/sops/age/keys.txt`). Jamais dans Git, jamais envoyée à une IA.
-3. **Déchiffrement** : `ansible-playbook deploy.yml` déchiffre le fichier (module `community.sops`) vers `secrets/` (droits 600, dans le `.gitignore`).
-4. **Distribution** : docker compose monte chaque fichier en lecture seule dans `/run/secrets/`, et seulement dans le conteneur concerné. Les secrets n'apparaissent pas dans `docker inspect`.
-5. **Rotation** : modifier `secrets.enc.yaml` puis relancer `deploy.yml`. C'est aussi la réponse prévue en cas de fuite de secret (scénario de compromission, différent d'une simple indisponibilité).
+## 5. Matrice des flux
 
-Si l'équipe préfère Vault, il remplace SOPS sans changer le reste du schéma (un conteneur `vault` en plus sur le réseau `back`).
+Les numéros correspondent aux pastilles du schéma. Tout flux absent est interdit (pas de réseau commun ou réseau interne).
 
-## 5. Les 13 flux
+| N° | Source | Destination | Port | Objet | État |
+|---|---|---|---|---|---|
+| 1 | Wi-Fi (navigateurs) | waf | 8082 | Accès à la plateforme : front, API, auth, assistant | ✅ Fait |
+| 2 | **PC Attaquant .50** | waf | 8082 | **Attaque de démo** (flood sur /api/pay) | ✅ Fait |
+| 3 | waf | frontend, payment-api, auth | 3000, 8000, 8001 | Routes autorisées uniquement (le reste répond 403) | ✅ Fait |
+| 4 | frontend | waf | 8080 | Proxy du front : /api, /auth, /ai repassent par le waf | ✅ Fait |
+| 5 | traffic-gen | waf | 8080 | Trafic normal, par le même chemin qu'un client | ✅ Fait |
+| 6 | waf | ai-api | 8000 (réseau edge) | Assistant et détection via /ai/* | ✅ Fait |
+| 7 | navigateur du PC Hôte | ai-api | 127.0.0.1:8001 | Accès direct local (non publié sur le Wi-Fi) | ✅ Fait |
+| 8 | payment-api | postgres | 5432 | Transactions et débit du solde | ✅ Fait |
+| 9 | auth | postgres | 5432 | Comptes, soldes, mots de passe hachés | ✅ Fait |
+| 10 | payment-api | (aucun appel à auth) | — | Le jeton JWT est vérifié localement avec le secret partagé | ✅ Fait |
+| 11 | prometheus | payment-api, auth, cadvisor, docker-stats, loki, promtail, ml-detector, remediation | /metrics | Collecte toutes les 15 s (5 s pour ml-detector et remediation), dont le score ML et les actions de remédiation (ai-api n'est pas collecté) | ⚠️ Partiel |
+| 12 | promtail | loki | 3100 | Envoi des journaux | ✅ Fait |
+| 13 | grafana | prometheus, loki | 9090, 3100 | Tableaux de bord et vue SOC | ✅ Fait |
+| 14 | promtail, cadvisor, docker-stats | socket-proxy-ro | 2375 | Lecture des conteneurs (GET seulement) | ✅ Fait |
+| 15 | Postes équipe | grafana | 3000 | Supervision avec compte | ✅ Fait |
+| 16 | ml-detector | loki, docker-stats-exporter | 3100, 9105 | Lecture des journaux du WAF et du trafic, état des conteneurs | ✅ Fait |
+| 17 | ml-detector | remediation | 8020 | POST /alerts avec jeton : type (crash, dos, intrusion), service, score | ✅ Fait |
+| 18 | remediation | socket-proxy-remed | 2375 | Redémarrage d'un conteneur en liste blanche | ✅ Fait |
+| 19 | remediation | waf (volume + réseau app) | fichier, 8080 | Règle de blocage (signature de l'outil ou limitation de débit) écrite dans le volume waf-blocklist, rechargée à chaud par le WAF ; paiement de test via le WAF | ✅ Fait |
+| 20 | remediation | postgres | 5432 | Contrôle d'intégrité, compte remediation_ro en lecture | ✅ Fait |
+| 21 | ai-api | Ollama (PC IA ou hôte) | 11434 | Génération des réponses de l'assistant, seule sortie vers l'extérieur | ✅ Fait |
+| 22 | payment-api | remediation | 8020 (GET /health, /status) | Lecture de l'état de la remédiation pour la zone 4 du dashboard | ✅ Fait |
+| 23 | secrets.enc.env (PC Hôte) | tous les services | .env → variables d'environnement | Distribution des secrets au démarrage (déchiffrés par SOPS + age) | ✅ Fait |
 
-| N° | De                                     | Vers                                          | Protocole / port                       | Pour quoi faire                                                                          |
-| --- | -------------------------------------- | --------------------------------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------- |
-| 1   | Navigateur client                      | waf                                           | HTTP / 80                              | Connexion et paiement                                                                    |
-| 2   | **PC Attaquant** (script Python) | waf                                           | HTTP / 80                              | **Attaque** : flood sur `/api/pay` ou force brute sur `/api/auth/login`        |
-| 3   | waf                                    | web, auth, payment                            | HTTP / 3000, 8001, 8000                | Transmission des requêtes autorisées                                                   |
-| 4   | auth, payment                          | db                                            | TCP / 5432                             | Lecture et écriture des données (pool de connexions limité)                           |
-| 5   | promtail                               | loki                                          | HTTP / 3100                            | Journaux de tous les conteneurs (dont le WAF)                                            |
-| 6   | prometheus                             | auth, payment, resilience-engine              | HTTP / `/metrics`                    | Métriques toutes les 5 s                                                                |
-| 7   | grafana                                | prometheus, loki                              | HTTP / 9090, 3100                      | Tableaux de bord et vue SOC                                                              |
-| 8   | resilience-engine                      | prometheus                                    | HTTP / 9090                            | Indicateurs pour le modèle ML (toutes les 10 s, aucune requête vers PostgreSQL)        |
-| 9   | resilience-engine                      | docker-proxy                                  | HTTP / 2375                            | Redémarrage d'un conteneur, rechargement du WAF (via Ansible)                           |
-| 10  | resilience-engine                      | waf                                           | HTTP / 80                              | IP en liste noire + **transaction test** de bout en bout                           |
-| 11  | web (`/dashboard`)                   | resilience-engine                             | HTTP / 8020 `GET /status`            | État, score ML, étapes de reprise en direct                                            |
-| 12  | assistant                              | ollama                                        | HTTP / 11434                           | Questions au modèle de langage                                                          |
-| 13  | SOPS + Ansible (`deploy.yml`)        | db, auth, payment, grafana, resilience-engine | Fichiers montés dans `/run/secrets` | **Distribution des secrets** au déploiement (mots de passe PostgreSQL, clés JWT) |
+> **À noter :** Le plan d'adressage de Mélanie indique un flux payment-api → auth (vérification des jetons). Dans le code, payment-api vérifie le jeton lui-même avec le secret partagé et n'appelle jamais auth. À aligner dans *docs/plan-adressage.md*.
 
-Tout flux absent de ce tableau est interdit.
+## 6. Sécurité en place (vérifiée dans le code)
 
-## 6. Ce qui se passe pendant la démo
+| Mesure | Où dans le code | État |
+|---|---|---|
+| Double WAF, niveau 1 (nginx) : point d'entrée unique, liste blanche de routes (/api/docs, /api/metrics, /api/waf/block → 403) | infra/placeholders/waf/default.conf | ✅ Fait |
+| Liste de blocage rechargée à chaud, sans redémarrage ni coupure, avec retour arrière automatique si nginx refuse la règle | infra/waf-reload, ansible/roles/waf_blocklist | ✅ Fait |
+| IP source non falsifiable : X-Forwarded-For forcé à l'IP vue par le WAF | default.conf (proxy_set_header … $remote_addr) | ✅ Fait |
+| Liste de blocage dynamique (IP, User-Agent, limitation) écrite par Ansible | ansible/roles/waf_blocklist + volume waf-blocklist | ✅ Fait |
+| Double WAF, niveau 2 (applicatif, dans payment-api) : limitation de débit, 40 requêtes / 2 s par client sur /pay | backend/app/waf.py | ✅ Fait |
+| Routes /waf/block et /waf/unblock protégées par jeton (REMEDIATION_TOKEN) | backend/app/main.py | ✅ Fait |
+| simulate_failure ignoré sauf si CHAOS_MODE_ENABLED=true côté serveur | backend/app/services.py | ✅ Fait |
+| Authentification : mots de passe scrypt, verrouillage après 5 échecs par compte, jeton JWT HS256, débit du solde | backend-auth/app/main.py, backend/app/auth.py | ✅ Fait |
+| Paiements anonymes encore acceptés (REQUIRE_AUTH=false par défaut) | docker-compose.yml | ⚠️ Partiel |
+| Base non publiée, rôle remediation_ro en lecture pour la remédiation | docker-compose.yml, infra/postgres | ✅ Fait |
+| Accès Docker par proxys : lecture seule (supervision), redémarrage seul (remédiation) | docker-compose.yml | ✅ Fait |
+| Alertes du détecteur authentifiées par jeton (comparaison à temps constant), alertes rejouées ignorées | infra/remediation-engine/engine.py | ✅ Fait |
+| Garde-fous du moteur : 90 s entre deux actions par service, 3 actions max en 10 min, playbooks en liste blanche | engine.py, ansible/group_vars/all.yml | ✅ Fait |
+| Conteneurs durcis : no-new-privileges, read_only et cap_drop sur la plupart, limites CPU/RAM sur certains | docker-compose.yml | ⚠️ Partiel |
+| Secrets : .env.enc / secrets.enc.env chiffrés SOPS + age, déchiffrés en .env ; passés en variables d'environnement | scripts/decrypt_secrets.sh | ⚠️ Partiel |
 
-| Étape          | Ce qui se passe                                                                                           | Où on le voit                     |
-| --------------- | --------------------------------------------------------------------------------------------------------- | ---------------------------------- |
-| 0. Normal       | `traffic.py` envoie du trafic légitime, les paiements passent                                          | Dashboard tout vert                |
-| 1. Attaque      | Clara lance `attack.py` depuis le PC Attaquant (flux 2)                                                 | Terminal de l'attaquant            |
-| 2. Détection   | resilience-engine lit Prometheus, le modèle Isolation Forest classe la situation comme anormale (flux 8) | Dashboard : score ML en rouge      |
-| 3. Remédiation | Le playbook Ansible bannit l'IP au WAF et redémarre le service s'il ne répond plus (flux 9, 10)         | Dashboard : étapes en cours       |
-| 4. Preuve       | Transaction test complète via le WAF : connexion + paiement (flux 10)                                    | Dashboard : « SERVICE RÉTABLI » |
-| 5. Mesure       | Temps de détection et de reprise, comparés au RTO du PCA                                                | Grafana + dossier                  |
+## 7. Écarts avec l'architecture cible validée (v2.1)
 
-## 7. Performances : tenir la charge sur un seul PC
+| Point | Cible v2.1 (19/10) | Construit (21/10) | Commentaire |
+|---|---|---|---|
+| Nombre de services | 13 conteneurs | 17 services | Ajout de traffic-gen, cadvisor, docker-stats-exporter, 2 proxys Docker ; ml-detector séparé |
+| Réseaux | 2 (front, back) | 5 zones (edge, app, data, monitoring, remediation) | Plus fin que prévu : meilleure isolation |
+| WAF | Nginx + ModSecurity (OWASP CRS), port 80 | nginx : liste blanche + liste de blocage rechargée à chaud, port 8082 | Double WAF : nginx (liste blanche, blocage) + WAF applicatif dans payment-api (waf.py) ; pas de règles OWASP |
+| Détection + remédiation | Un service resilience-engine qui lit Prometheus | ml-detector + remediation (séparés), le détecteur lit Loki | Boucle en place depuis le 20/10 au soir ; séparation plus sûre (le détecteur ne touche pas à Docker) |
+| Assistant IA | Conteneurs assistant + ollama | ai-api (ML + RAG) + Ollama hors Docker | Ollama sur le PC IA (.60) : PC IA utilisé, contrairement à la cible |
+| Authentification | auth, JWT RS256 (clé privée isolée) | auth, JWT HS256 (secret partagé) | payment-api détient aussi le secret de signature |
+| Secrets | SOPS → fichiers /run/secrets | SOPS → .env → variables d'environnement | Visibles avec docker inspect |
+| Grafana | 127.0.0.1 uniquement | Publié sur le Wi-Fi (3000), avec compte | Choix de l'équipe, risque documenté |
+| Dashboard | /dashboard local, bloqué par le WAF | Dans le front, accessible via le WAF | Visible par tout le Wi-Fi, y compris l'attaquant |
 
-Les 13 conteneurs partagent la mémoire et le processeur du PC Hôte. L'attaque crée un pic de charge : la plateforme doit rester fluide pour que la détection, la remédiation et la transaction test aient lieu à temps.
+## 8. Points d'attention avant la démo
 
-### PostgreSQL (Antoine)
-
-- **Requêtes avec des CTE directes** plutôt que des vues lourdes. Depuis PostgreSQL 12, une CTE simple est intégrée à la requête par l'optimiseur : lisible et sans coût supplémentaire.
-- **Un paiement = une seule requête atomique** (débit + enregistrement) : un seul aller-retour, pas d'incohérence possible.
-- **Index utiles et seulement eux** : `users(username)` unique, `transactions(account_id, created_at DESC)`, `transactions(created_at)`. Chaque index ralentit les écritures, donc pas d'index « au cas où ».
-- **Pool de connexions** limité (5 à 10 par service) et **`statement_timeout` de 2 s** : sous attaque, les requêtes en trop attendent ou échouent vite au lieu de saturer la base.
-- Vérifier chaque requête importante avec `EXPLAIN ANALYZE` (aucun parcours complet de la table `transactions`).
-- Le **modèle ML ne requête jamais PostgreSQL** : il lit Prometheus. La base ne sert qu'aux paiements.
-
-Exemple : un paiement en une requête (si le solde est insuffisant, rien n'est inséré).
-
-```sql
-WITH debit AS (
-  UPDATE accounts
-     SET balance = balance - :amount
-   WHERE id = :account_id
-     AND balance >= :amount
-  RETURNING id
-)
-INSERT INTO transactions (account_id, amount, recipient)
-SELECT id, :amount, :recipient FROM debit
-RETURNING id, created_at;
-```
-
-### Budget par conteneur (Mélanie)
-
-| Conteneur                  | RAM max             | CPU max |
-| -------------------------- | ------------------- | ------- |
-| ollama                     | 2,5 Go              | 2       |
-| assistant                  | 768 Mo              | 0,5     |
-| db                         | 512 Mo              | 1       |
-| prometheus                 | 512 Mo              | 0,5     |
-| resilience-engine          | 512 Mo              | 0,5     |
-| loki                       | 384 Mo              | 0,5     |
-| web                        | 384 Mo              | 0,5     |
-| waf, grafana               | 256 Mo chacun       | 0,5     |
-| auth, payment              | 192 Mo chacun       | 0,5     |
-| promtail, docker-proxy     | 128 / 32 Mo         | 0,25    |
-| **Total conteneurs** | **≈ 6,6 Go** |         |
-
-- Plafonds fixés dans le docker-compose (`mem_limit`, `cpus`) : un conteneur emballé ne peut pas faire tomber les autres.
-- WSL2 limité à 10 Go (fichier `.wslconfig`) pour garder Windows réactif.
-- Rétention courte : 24 h pour Prometheus et Loki.
-- Le WAF limite le débit par IP : il protège la base avant même la remédiation.
-- Valeurs de départ, à ajuster mardi avec `docker stats`.
-
-## 8. Conformité au sujet
-
-| Exigence du sujet                                                                    | Notre réponse                                                                                           |
-| ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
-| Microservices : base, API métier, authentification, frontal web                     | db, payment, auth, web                                                                                   |
-| Node.js / FastAPI / Go • dashboard React + Tailwind                                 | FastAPI • Next.js (React) + Tailwind                                                                    |
-| Moteur de remédiation + interface de supervision                                    | resilience-engine + page `/dashboard`                                                                  |
-| Docker Compose + playbooks Ansible                                                   | 1 `docker-compose.yml` • `deploy.yml`, `reset.yml`, `remediate.yml`                             |
-| Prometheus, Grafana, Loki (pas d'Elastic)                                            | prometheus, grafana, loki + promtail                                                                     |
-| Détection ML (pas de seuils en dur), branchée sur la remédiation                  | Isolation Forest dans resilience-engine                                                                  |
-| RAG Ollama + LangChain, ≤ 8B, séparé de la remédiation, sans accès privilégié | assistant + ollama (Qwen 2.5 1.5B), lecture seule de `docs/`                                           |
-| Attaque depuis un PC distinct                                                        | Script Python sur le PC Attaquant → WAF                                                                 |
-| WAF, SIEM/SOC, durcissement                                                          | ModSecurity • vue SOC Grafana • non-root, ports fermés, budgets de ressources                         |
-| **Gestion des secrets : HashiCorp Vault ou SOPS**                              | **SOPS + age** : secrets chiffrés dans Git, distribués par fichiers `/run/secrets` (section 4) |
-| Accès du moteur de remédiation maîtrisés                                         | docker-proxy filtré • aucune route d'action exposée                                                   |
-| Hotspot, PC Hôte en 192.168.137.1, services internes non exposés                   | Seul le port 80 du WAF est ouvert                                                                        |
-| Reprise prouvée par une nouvelle transaction                                        | Transaction test automatique                                                                             |
-
-## 9. Ce qu'on a simplifié (et pourquoi)
-
-- **Pas de PC IA** : un modèle de 1,5B tient dans les 16 Go du PC Hôte. Le PC IA reste un plan B.
-- **Détection et remédiation dans un seul service** : pas de format d'alerte à négocier, pas de token entre services, rien ne peut ordonner une réparation de l'extérieur. Agathe code le module de détection, Mélanie le module de remédiation.
-- **Paiement et dashboard dans la même application Next.js** : un seul projet front. Le WAF bloque `/dashboard` depuis le réseau.
-- **SOPS au lieu de Vault** : aucun conteneur, secrets chiffrés dans Git.
-- **2 réseaux Docker**, pas de cAdvisor, HTTP au lieu de HTTPS (cité comme amélioration dans les limites).
-
-## 10. À vérifier dès aujourd'hui
-
-- [ ] Le WAF voit-il la vraie IP de l'attaquant ? Docker Desktop peut la masquer. Plan B : bloquer par compte ou par jeton.
-- [ ] RAM réelle du PC Hôte avec les 13 conteneurs (`docker stats`). Si ça coince, ollama passe sur le PC IA.
-- [ ] Générer la clé age sur le PC Hôte et chiffrer un premier `secrets.enc.yaml` (Clara + Mélanie).
-- [ ] Validation du schéma par le coach.
+- **Boucle mesurée à environ 35 s** (flood : attaque → détection → playbook → paiement de preuve, sans humain). À refaire le jour J ; l'intrusion et le service arrêté restent à chronométrer.
+- **Le modèle juge l'anomalie, des règles choisissent la réponse** : une alerte ne part que si une cause est reconnue (conteneur arrêté, refus 429/503, outil d'attaque ou 403). À expliquer clairement au jury.
+- **Riposte au flood** : la signature de l'outil (par exemple python-requests) est bloquée directement, les navigateurs passent ; sans signature, une limitation de débit commune à tous les clients extérieurs (même IP vue par le WAF). Aucune règle n'est retirée automatiquement : make unblock après la démo.
+- **Ne jamais lancer make restart, block ou restore pendant la démo** : ce serait une intervention humaine (0/5 sur l'axe 1).
+- **/api/waf/status est public** : il expose la liste des IP bannies et les statistiques du pare-feu.
+- **Ollama** : confirmer s'il tourne sur le PC IA (192.168.137.60) ou sur le PC Hôte pour la démo.

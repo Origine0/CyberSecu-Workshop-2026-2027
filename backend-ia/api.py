@@ -184,18 +184,25 @@ def init_ml_model(csv_path: Optional[str] = None) -> IsolationForest:
 model = init_ml_model()
 
 # ==============================================================================
-# PILIER 2 : ASSISTANT DOCUMENTAIRE RAG (FAISS + OLLAMA) SANS DROIT DE REMÉDIATION
+# PILIER 2 : ASSISTANT DOCUMENTAIRE & CYBER RAG (FAISS + OLLAMA + TÉLÉMÉTRIE LIVE)
+# SANS PRIVILÈGE D'EXÉCUTION TECHNIQUE (RÔLE STRICTEMENT CONSULTATIF)
 # ==============================================================================
 # Prompt d'injection stricte de sécurité interdisant toute remédiation autonome
-RAG_SYSTEM_PROMPT = """Tu es l'assistant documentaire cyber de PROJECT RESILIENCE-ALPHA.
-RÈGLE ABSOLUE DE SÉCURITÉ : Ton rôle est STRICTEMENT ANALYTIQUE ET CONSULTATIF. Tu n'as STRICTEMENT AUCUN DROIT DE REMÉDIATION ni d'exécution de commande.
-Tu ne dois jamais exécuter, ordonner ou simuler d'action technique autonome sur l'infrastructure.
-Réponds exclusivement à partir des procédures fournies dans le contexte ci-dessous.
-Réponds de manière concise, percutante et claire (en 2 à 3 phrases maximum) pour permettre une synthèse vocale fluide à l'opérateur.
-Si une procédure de remédiation est demandée, détaille les consignes documentées pour l'opérateur humain tout en rappelant que tu n'exécutes aucune action directe.
-Si l'information demandée n'est pas présente dans le document, indique simplement que la documentation disponible ne contient pas cette information.
+RAG_SYSTEM_PROMPT = """Tu es l'assistant vocal cyber et résilience de PROJECT RESILIENCE-ALPHA.
+RÈGLE ABSOLUE DE SÉCURITÉ : Ton rôle est STRICTEMENT ANALYTIQUE ET CONSULTATIF. Tu n'as STRICTEMENT AUCUN DROIT DE REMÉDIATION directe ni d'exécution de commande sur l'infrastructure. Tu ne dois jamais exécuter, ordonner ou simuler d'action technique autonome.
 
-Extrait des procédures de sécurité :
+Tu réponds aux questions de l'opérateur concernant :
+1. L'architecture du système (microservices, bases PostgreSQL, WAF, proxy, monitoring Prometheus/Grafana/Loki, plan d'adressage Wi-Fi 192.168.137.0/24 et réseaux Docker).
+2. La conformité réglementaire (DORA, PCA-PRA, RTO/RPO, gestion des secrets SOPS + age).
+3. Les attaques subies et scénarios Red Team (SC-01 DDoS Flood L7, SC-02 Fuzzing 422, SC-03 Fuite CWE-209, SC-04 Chaos bancaire, scripts red_attack.py).
+4. L'état en temps réel du système et du WAF (attaques bloquées, IPs actuellement bannies, métriques et détections ML).
+
+Consignes de réponse :
+- Réponds de manière concise, précise, factuelle et claire (2 à 4 phrases maximum) pour permettre une synthèse vocale fluide sur le HUD du robot ou le dashboard.
+- Si une procédure de remédiation est demandée, détaille les consignes documentées pour l'opérateur humain tout en rappelant que tu n'exécutes aucune action directe.
+- Si l'information demandée ne figure ni dans la documentation ni dans la télémétrie en temps réel ci-dessous, indique sobrement que l'information n'est pas répertoriée.
+
+Contexte opérationnel (Télémétrie en temps réel & Documentation) :
 {context}
 
 Question de l'opérateur :
@@ -213,16 +220,91 @@ llm = Ollama(
     base_url=OLLAMA_BASE_URL,
     model=OLLAMA_MODEL,
     temperature=0.1,
-    num_predict=85,
-    stop=["\n\n\n", "Question de l'opérateur", "RÈGLE ABSOLUE", "Extrait des"],
+    num_predict=160,
+    stop=["\n\n\n", "Question de l'opérateur", "RÈGLE ABSOLUE", "Extrait des", "--- Source:"],
     timeout=40.0
 )
 
 vector_db = None
 qa_chain = None
 
+def fetch_live_system_snapshot() -> str:
+    """
+    Récupère en temps réel (max 0.6s) l'état opérationnel du WAF et du cluster
+    pour l'injecter dynamiquement dans le contexte RAG.
+    Permet à l'assistant de répondre instantanément aux questions sur les attaques
+    actuellement subies, les requêtes bloquées et les IPs bannies.
+    """
+    import urllib.request
+    endpoints = [
+        "http://waf:8080/api/waf/status",
+        "http://payment-api:8000/waf/status",
+        "http://localhost:8082/api/waf/status"
+    ]
+    data = None
+    for url in endpoints:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Resilience-RAG/1.0"})
+            with urllib.request.urlopen(req, timeout=0.6) as response:
+                if response.status == 200:
+                    data = json.loads(response.read().decode("utf-8"))
+                    break
+        except Exception:
+            continue
+
+    if not data:
+        return "[TÉLÉMÉTRIE TEMPS RÉEL DU SYSTÈME]\nStatut : Plateforme active. Données détaillées du WAF en attente de synchronisation."
+
+    try:
+        stats = data.get("stats", {})
+        total_blocked = stats.get("total_blocked", 0)
+        rate_limit_drops = stats.get("rate_limit_drops", 0)
+        banned_ip_drops = stats.get("banned_ip_drops", 0)
+        fuzzing_drops = stats.get("fuzzing_drops", 0)
+
+        banned_ips = data.get("banned_ips", [])
+        banned_ips_str = ", ".join(banned_ips) if banned_ips else "Aucune IP actuellement bannie"
+
+        grafana = data.get("grafana", {})
+        ml_anomaly = grafana.get("ml_anomaly", False)
+        ml_alerts_1h = grafana.get("ml_alerts_1h", 0)
+        targets_up = grafana.get("targets_up_ratio", 100.0)
+
+        features = grafana.get("features_series", {})
+        req_rates = features.get("request_rate", [])
+        latencies = features.get("latency_ms", [])
+        err_rates = features.get("error_rate", [])
+
+        cur_req = req_rates[-1]["value"] if req_rates else 0.50
+        cur_lat = latencies[-1]["value"] if latencies else 28.0
+        cur_err = err_rates[-1]["value"] if err_rates else 0.0
+
+        containers = grafana.get("containers", {})
+        total_c = len(containers)
+        healthy_c = sum(1 for c in containers.values() if c.get("healthy", False))
+
+        remed = data.get("remediation", {})
+        remed_status = remed.get("status", "UP")
+        recent_actions = remed.get("recent_actions", [])
+        remed_str = f"{len(recent_actions)} action(s) récente(s)" if recent_actions else "Aucune remédiation en cours"
+
+        return (
+            f"[TÉLÉMÉTRIE TEMPS RÉEL DU SYSTÈME & ATTAQUES SUBIES]\n"
+            f"- Requêtes bloquées au WAF : {total_blocked} requête(s) interceptée(s) "
+            f"(DDoS rate limiting: {rate_limit_drops}, IPs bannies: {banned_ip_drops}, Fuzzing/malformé: {fuzzing_drops})\n"
+            f"- Adresses IP bannies au WAF : {banned_ips_str}\n"
+            f"- État détection d'anomalie ML : {'ALERTE ATTAQUE EN COURS' if ml_anomaly else 'NOMINAL (Trafic normal)'} "
+            f"(Total alertes 1h : {ml_alerts_1h})\n"
+            f"- Métriques de trafic courantes : Débit = {cur_req:.2f} req/s, Latence = {cur_lat:.1f} ms, Taux d'erreurs = {cur_err:.2f}%\n"
+            f"- Santé globale des conteneurs : {healthy_c}/{total_c} conteneurs sains ({targets_up:.1f}% cibles UP)\n"
+            f"- Remédiation autonome Ansible : Statut {remed_status}, {remed_str}"
+        )
+    except Exception as e:
+        logger.warning(f"Avertissement lors de la mise en forme de la télémétrie : {e}")
+        return "[TÉLÉMÉTRIE TEMPS RÉEL DU SYSTÈME]\nStatut : Surveillance WAF et microservices active."
+
 def init_vector_store():
-    """Charge procedures.pdf et les dossiers markdown de gouvernance, calcule les embeddings CPU et instancie la base FAISS."""
+    """Charge procedures.pdf et l'ensemble des bases markdown de connaissances (architecture, attaques, gouvernance, adressage)."""
     global vector_db, qa_chain
     documents = []
 
@@ -235,33 +317,47 @@ def init_vector_store():
         except Exception as e:
             logger.error(f"Erreur lors du chargement de {PROCEDURES_FILE}: {e}")
 
-    # 2. Chargement des documents Markdown de gouvernance (BIA, EBIOS RM, DORA, Architecture)
-    knowledge_dir = os.path.join(os.path.dirname(__file__), "knowledge")
-    if os.path.exists(knowledge_dir):
-        from langchain_core.documents import Document
-        for fname in sorted(os.listdir(knowledge_dir)):
-            if fname.endswith(".md"):
-                fpath = os.path.join(knowledge_dir, fname)
-                try:
-                    with open(fpath, "r", encoding="utf-8") as f:
-                        content = f.read()
-                    documents.append(Document(page_content=content, metadata={"source": fname}))
-                    logger.info(f"Document gouvernance chargé pour RAG : {fname}")
-                except Exception as e:
-                    logger.error(f"Erreur lors de la lecture de {fname}: {e}")
+    # 2. Chargement des documents Markdown de connaissances (Architecture, Attaques Red Team, EBIOS RM, DORA, Plan d'adressage)
+    candidate_dirs = [
+        "/data/knowledge",
+        os.path.join(os.path.dirname(__file__), "knowledge"),
+        os.path.join(os.getcwd(), "backend-ia", "knowledge")
+    ]
+    seen_files = set()
+    from langchain_core.documents import Document
+
+    for kdir in candidate_dirs:
+        if os.path.exists(kdir):
+            for fname in sorted(os.listdir(kdir)):
+                if fname.endswith(".md") and fname not in seen_files:
+                    fpath = os.path.join(kdir, fname)
+                    try:
+                        with open(fpath, "r", encoding="utf-8") as f:
+                            content = f.read()
+                        documents.append(Document(page_content=content, metadata={"source": fname}))
+                        seen_files.add(fname)
+                        logger.info(f"Document de connaissances chargé pour RAG : {fname} ({len(content)} caractères)")
+                    except Exception as e:
+                        logger.error(f"Erreur lors de la lecture de {fname}: {e}")
 
     if documents:
         try:
             text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=500,
-                chunk_overlap=50
+                chunk_size=600,
+                chunk_overlap=100
             )
             chunks = text_splitter.split_documents(documents)
-            logger.info(f"{len(chunks)} chunks extraits pour le RAG.")
+            logger.info(f"{len(chunks)} chunks extraits pour le RAG ({len(seen_files)} fichiers markdown chargés).")
 
             # Mode 100% Hors-Ligne : Chargement local prioritaire sans requête Internet
-            local_model_path = os.path.join(os.path.dirname(__file__), "models", "all-MiniLM-L6-v2")
-            if os.path.exists(local_model_path):
+            local_model_paths = [
+                os.path.join(os.path.dirname(__file__), "models", "all-MiniLM-L6-v2"),
+                "/app/models/all-MiniLM-L6-v2",
+                "/data/models/all-MiniLM-L6-v2"
+            ]
+            local_model_path = next((p for p in local_model_paths if os.path.exists(p)), None)
+
+            if local_model_path:
                 logger.info(f"Chargement embeddings 100% HORS-LIGNE depuis : {local_model_path}")
                 embeddings = HuggingFaceEmbeddings(
                     model_name=local_model_path,
@@ -277,10 +373,10 @@ def init_vector_store():
             qa_chain = RetrievalQA.from_chain_type(
                 llm=llm,
                 chain_type="stuff",
-                retriever=vector_db.as_retriever(search_kwargs={"k": 3}),
+                retriever=vector_db.as_retriever(search_kwargs={"k": 4}),
                 chain_type_kwargs={"prompt": qa_prompt}
             )
-            logger.info("Base vectorielle FAISS et chaîne RAG initialisées avec succès avec la gouvernance.")
+            logger.info("Base vectorielle FAISS et chaîne RAG initialisées avec succès sur l'ensemble du système et des attaques.")
         except Exception as e:
             logger.error(f"Erreur lors de l'initialisation FAISS / HuggingFace: {e}")
     else:
@@ -398,22 +494,36 @@ def analyze_metrics(payload: MetricPayload):
 @app.post("/ask", response_model=RAGResponse, tags=["RAG Assistant"])
 def ask_assistant(payload: QuestionPayload):
     """
-    Interroge l'assistant RAG sur les procédures de sécurité.
+    Interroge l'assistant RAG sur l'architecture, l'état du système et les attaques subies.
     L'assistant n'exécute aucune remédiation et fournit un rôle exclusivement consultatif.
+    Combine la base vectorielle documentaire (FAISS) et la télémétrie en direct du WAF.
     """
-    if not qa_chain:
+    if not vector_db:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Base documentaire non disponible. Vérifiez la présence de {PROCEDURES_FILE}."
+            detail="Base vectorielle documentaire non disponible. Vérifiez la présence des fichiers de connaissances."
         )
 
     try:
         logger.info(f"Question RAG reçue : '{payload.query}'")
-        res = qa_chain.invoke({"query": payload.query})
-        answer = res.get("result", "")
+
+        # 1. Télémétrie en direct (attaques subies, requêtes bloquées au WAF, IPs bannies, santé)
+        live_telemetry = fetch_live_system_snapshot()
+
+        # 2. Recherche vectorielle des passages les plus pertinents dans la documentation
+        docs = vector_db.similarity_search(payload.query, k=4)
+        doc_context = "\n\n".join([f"--- Source: {doc.metadata.get('source', 'doc')} ---\n{doc.page_content}" for doc in docs])
+
+        full_context = f"{live_telemetry}\n\n[DOCUMENTATION TECHNIQUE, PROCÉDURES ET ATTAQUES]\n{doc_context}"
+
+        # 3. Génération avec le prompt de sécurité consultatif
+        prompt_input = qa_prompt.format(context=full_context, question=payload.query)
+        raw_answer = llm.invoke(prompt_input)
+        clean_answer = raw_answer.strip()
+
         return {
             "query": payload.query,
-            "response": answer,
+            "response": clean_answer,
             "status": "SUCCESS",
             "advisory_role": "READ_ONLY_NO_REMEDIATION"
         }
@@ -421,5 +531,5 @@ def ask_assistant(payload: QuestionPayload):
         logger.error(f"Erreur lors de l'appel au LLM Ollama ({OLLAMA_BASE_URL}) : {e}")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Échec de communication avec Ollama sur {OLLAMA_BASE_URL}. Vérifiez qu'Ollama est démarré et que le modèle {OLLAMA_MODEL} est présent."
+            detail=f"Échec de communication avec Ollama sur {OLLAMA_BASE_URL} : {str(e)}"
         )

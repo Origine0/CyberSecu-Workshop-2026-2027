@@ -378,9 +378,12 @@ export const FastApiExplorer: React.FC<FastApiExplorerProps> = ({
           {activeRoute === 'ask' && (
             <form onSubmit={handleTestAsk} className="space-y-3">
               <div>
-                <label className="block text-xs font-medium text-zinc-500 mb-1">
-                  Question pour l'assistant RAG
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-medium text-zinc-500">
+                    Question pour l'assistant RAG
+                  </label>
+                  <span className="text-[10px] text-purple-600 font-mono font-medium">FAISS + Télémétrie Live</span>
+                </div>
                 <textarea
                   rows={3}
                   value={ragQuery}
@@ -390,8 +393,40 @@ export const FastApiExplorer: React.FC<FastApiExplorerProps> = ({
                 />
               </div>
 
+              {/* Suggestions rapides */}
+              <div className="flex flex-wrap gap-1">
+                <button
+                  type="button"
+                  onClick={() => setRagQuery("Quels sont les scénarios d'attaque testés sur la plateforme ?")}
+                  className="text-[10px] px-2 py-1 rounded-lg bg-zinc-100 hover:bg-purple-100 hover:text-purple-800 text-zinc-600 transition-colors cursor-pointer"
+                >
+                  🎯 Scénarios SC-01 à SC-04
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRagQuery("Combien de requêtes ou attaques ont été bloquées par le WAF ?")}
+                  className="text-[10px] px-2 py-1 rounded-lg bg-zinc-100 hover:bg-purple-100 hover:text-purple-800 text-zinc-600 transition-colors cursor-pointer"
+                >
+                  🛡️ Attaques bloquées au WAF
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRagQuery("Quels conteneurs composent l'architecture du système ?")}
+                  className="text-[10px] px-2 py-1 rounded-lg bg-zinc-100 hover:bg-purple-100 hover:text-purple-800 text-zinc-600 transition-colors cursor-pointer"
+                >
+                  🏗️ Microservices
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRagQuery("Quel est le plan d'adressage IP du labo ?")}
+                  className="text-[10px] px-2 py-1 rounded-lg bg-zinc-100 hover:bg-purple-100 hover:text-purple-800 text-zinc-600 transition-colors cursor-pointer"
+                >
+                  🌐 Plan d'adressage Wi-Fi
+                </button>
+              </div>
+
               <div className="p-2.5 rounded-xl bg-purple-50/60 border border-purple-100 text-[11px] text-purple-800">
-                L'assistant analyse <strong>procedures.pdf</strong> via FAISS et Ollama (qwen2.5:1.5b). Rôle strictement consultatif.
+                L'assistant analyse la base de connaissances (Architecture, Attaques SC-01 à SC-04, EBIOS RM, DORA, Plan d'adressage) combinée à la <strong>télémétrie en temps réel du WAF</strong> via FAISS + Ollama (qwen2.5:1.5b). Rôle strictement consultatif.
               </div>
 
               <button

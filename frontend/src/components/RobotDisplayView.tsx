@@ -769,26 +769,44 @@ export const RobotDisplayView: React.FC<RobotDisplayViewProps> = ({
             {/* Questions rapides prêtes à l'emploi (1 clic pour le jury) */}
             <div className="w-full flex flex-col gap-1.5 mt-1">
               <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider text-left">
-                Ou choisissez une question rapide :
+                Questions rapides (Système, Architecture & Attaques subies) :
               </span>
-              <div className="flex flex-wrap gap-1.5 justify-center">
+              <div className="flex flex-wrap gap-1.5 justify-center max-h-24 overflow-y-auto pr-1">
+                <button
+                  onClick={() => handleAskRagQuestion("Quels sont les scénarios d'attaque testés sur la plateforme ?")}
+                  className="text-[10px] font-medium bg-zinc-900/80 hover:bg-indigo-950/60 border border-zinc-800 hover:border-indigo-500/40 text-zinc-300 px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer"
+                >
+                  🎯 Scénarios d'attaque Red Team (SC-01 à SC-04)
+                </button>
+                <button
+                  onClick={() => handleAskRagQuestion("Combien de requêtes ou attaques ont été bloquées par le WAF ?")}
+                  className="text-[10px] font-medium bg-zinc-900/80 hover:bg-indigo-950/60 border border-zinc-800 hover:border-indigo-500/40 text-zinc-300 px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer"
+                >
+                  🛡️ Attaques & flux bloqués par le WAF
+                </button>
+                <button
+                  onClick={() => handleAskRagQuestion("Quels conteneurs et microservices composent l'architecture ?")}
+                  className="text-[10px] font-medium bg-zinc-900/80 hover:bg-indigo-950/60 border border-zinc-800 hover:border-indigo-500/40 text-zinc-300 px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer"
+                >
+                  🏗️ Microservices de l'architecture
+                </button>
+                <button
+                  onClick={() => handleAskRagQuestion("Quel est le plan d'adressage IP du labo et des conteneurs ?")}
+                  className="text-[10px] font-medium bg-zinc-900/80 hover:bg-indigo-950/60 border border-zinc-800 hover:border-indigo-500/40 text-zinc-300 px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer"
+                >
+                  🌐 Plan d'adressage Wi-Fi & Docker
+                </button>
+                <button
+                  onClick={() => handleAskRagQuestion("Pourquoi avoir choisi SOPS et age plutôt que HashiCorp Vault ?")}
+                  className="text-[10px] font-medium bg-zinc-900/80 hover:bg-indigo-950/60 border border-zinc-800 hover:border-indigo-500/40 text-zinc-300 px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer"
+                >
+                  🔑 Secrets : SOPS+age vs Vault
+                </button>
                 <button
                   onClick={() => handleAskRagQuestion("Que faire en cas d'attaque par déni de service ?")}
                   className="text-[10px] font-medium bg-zinc-900/80 hover:bg-indigo-950/60 border border-zinc-800 hover:border-indigo-500/40 text-zinc-300 px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer"
                 >
-                  ⚡ Que faire en cas d'attaque DoS ?
-                </button>
-                <button
-                  onClick={() => handleAskRagQuestion("Quelle est la procédure de confinement Zero-Touch ?")}
-                  className="text-[10px] font-medium bg-zinc-900/80 hover:bg-indigo-950/60 border border-zinc-800 hover:border-indigo-500/40 text-zinc-300 px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer"
-                >
-                  🛡️ Procédure de confinement WAF
-                </button>
-                <button
-                  onClick={() => handleAskRagQuestion("Quel est le rôle consultatif de l'assistant IA ?")}
-                  className="text-[10px] font-medium bg-zinc-900/80 hover:bg-indigo-950/60 border border-zinc-800 hover:border-indigo-500/40 text-zinc-300 px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer"
-                >
-                  🤖 Rôle consultatif sans remédiation
+                  ⚡ Procédure en cas de DoS
                 </button>
               </div>
             </div>
