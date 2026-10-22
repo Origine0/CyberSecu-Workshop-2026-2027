@@ -61,7 +61,7 @@ Les chiffres de l'entreprise sont **fictifs** (le sujet l'impose) mais réaliste
 
 ## 2. Plan de continuité et de reprise (PCA/PRA)
 
-Le **PCA** décrit comment le service **continue** pendant l'incident, le **PRA** comment on le **rétablit** ensuite. Chaque procédure s'appuie sur un composant actif dans le dépôt.
+Le **PCA** décrit comment le service **continue** pendant l'incident, le **PRA** comment on le **rétablit** ensuite. Chaque procédure s'appuie sur un composant qui existe dans le dépôt.
 
 ### 2.1 Scénarios couverts
 
@@ -78,9 +78,9 @@ Le **PCA** décrit comment le service **continue** pendant l'incident, le **PRA*
 
 ### 2.2 Procédures de reprise (playbooks Ansible)
 
-Les playbooks tournent dans le conteneur `remediation`. Ils sont déclenchés **automatiquement** par le service `ml-detector` via `POST http://remediation:8020/trigger` dès que deux fenêtres consécutives de 5 s présentent une anomalie (Isolation Forest ou règles de sécurité). Ils ne peuvent agir sur Docker qu'à travers un proxy qui n'autorise **que la lecture et le redémarrage**, et seulement sur une liste blanche de services (jamais la base, la supervision ou les proxys).
+Les playbooks tournent dans le conteneur *remediation*. Ils ne peuvent agir sur Docker qu'à travers un proxy qui n'autorise **que la lecture et le redémarrage**, et seulement sur une liste blanche de services (jamais la base, la supervision ou les proxys).
 
-| Playbook | Déclencheur automatique (`ml-detector`) | Étapes | Preuve de reprise | Durée |
+| Playbook | Déclencheur | Étapes | Preuve de reprise | Durée |
 |---|---|---|---|---|
 | **restart_service** | Service dégradé (S2, S6) | 1. Vérifie que le service est autorisé 2. Le redémarre 3. Attend qu'il soit sain (60 s max) | Paiement de test via le WAF | quelques s |
 | **block_source** | Source malveillante (S5) | 1. Contrôle la valeur (refuse les IP Docker) 2. Écrit la règle (IP, User-Agent ou limitation) 3. Recharge le WAF | Requête de contrôle bloquée (403) | quelques s |
@@ -138,11 +138,11 @@ Version courte, reliée au démonstrateur. Elle reprend les valeurs métier (VM1
 | Clients (navigateurs) | Seul accès autorisé à la plateforme, via le WAF | Faible : n'importe qui |
 | Marchands partenaires | Reçoivent les paiements, subissent l'arrêt | Moyen |
 | Équipe d'exploitation | Détient la clé SOPS et l'accès au PC Hôte | Élevé mais risque d'erreur ou de malveillance |
-| Fournisseurs logiciels | Images Docker, paquets Python et npm, modèle d'IA | Moyen : versions figées pour les images |
+| Fournisseurs logiciels | Images Docker, paquets Python et npm, modèle d'IA téléchargé au démarrage | Moyen : versions figées pour les images, pas pour tout |
 
-- **Scénario stratégique 1** (SR1 → ER1) : le cybercriminel sature l'API de paiement depuis le réseau ; les marchands ne sont plus payés.
-- **Scénario stratégique 2** (SR2 → ER2, ER3) : le fraudeur tente de passer des paiements malformés ou de rejouer une transaction.
-- **Scénario stratégique 3** (SR3 → ER4, ER6) : une dépendance piégée ou un initié tente de voler les secrets ou de détourner le moteur de réparation.
+- **Scénario stratégique 1** (SR1 → ER1) : le cybercriminel sature l'API de paiement depuis Internet ; les marchands ne sont plus payés.
+- **Scénario stratégique 2** (SR2 → ER2, ER3) : le fraudeur passe des paiements sans être authentifié ou rejoue une transaction.
+- **Scénario stratégique 3** (SR3 → ER4, ER6) : une dépendance piégée ou un initié vole les secrets, puis détourne le moteur de réparation.
 
 ### 3.3 Atelier 4 : scénario opérationnel SC-01, DDoS applicatif L7 (attaque de Clara)
 
@@ -158,7 +158,7 @@ Version courte, reliée au démonstrateur. Elle reprend les valeurs métier (VM1
 
 ### 3.4 Atelier 5 : plan de traitement
 
-| Risque | Mesure implémentée ou planifiée | Responsable | Échéance | Risque résiduel |
+| Risque | Mesure | Responsable | Échéance | Risque résiduel |
 |---|---|---|---|---|
 | ER1 Flood | **Fait** : X-Forwarded-For réécrit par le WAF ; boucle détection → playbooks mesurée à ≈ 35 s. **Reste** : retrait automatique de la limitation | Mélanie, Clara | Après le workshop | Effet collatéral sur les clients extérieurs (Docker Desktop) |
 | ER2 Paiement faux | **Fait** : débit du solde et refus si solde insuffisant. **Reste** : clé d'idempotence obligatoire | Antoine | Après le workshop | Paiements anonymes sans débit |
@@ -183,7 +183,7 @@ La version du 19/10 annonçait des protections prévues dans l'architecture. Voi
 
 ## 5. Conformité NIS2 / DORA
 
-Pour une entité financière, **DORA** (règlement (UE) 2022/2554) s'applique en priorité : c'est la règle spécifique au secteur, NIS2 (directive (UE) 2022/2555) reste la référence générale.
+Pour une entité financière, **DORA** (règlement (UE) 2022/2554) s'applique en priorité : c'est la règle spécifique au secteur, NIS2 (directive (UE) 2022/2555) reste la référence générale. Ce tableau fusionne la section DORA du rapport de Clara avec l'analyse de gouvernance.
 
 | Exigence DORA | Ce que le démonstrateur prouve | Ce qu'il ne peut pas prouver | Statut |
 |---|---|---|---|
