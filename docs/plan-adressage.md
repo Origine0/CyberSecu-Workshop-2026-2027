@@ -279,14 +279,18 @@ Depuis un PC du Wi-Fi :
 Cocher ✅ (conforme), ❌ (non conforme) ou laisser vide (pas encore testé). Date et testeur en bas.
 Ping : indicatif seulement. Ports : la vraie preuve.
 
-| Depuis ↓ / Test → | Ping `.1` | `.1:8082` (attendu ✅) | `.1:3000` | `.1:5432` (attendu ❌) | `.1:8000` (attendu ❌) | Ping des autres PC |
-|---|---|---|---|---|---|---|
-| Clara `.50` (Attaquant) | | | attendu : port ouvert, login refusé | | | |
-| Agathe `.60` (IA) | | | attendu ✅ | | | |
-| Antoine `.101` | | | attendu ✅ | | | |
-| Timéo `.102` | | | attendu ✅ | | | |
+Les 4 PC de l'équipe joignent le WAF (port 8082). Les ports 5432 et 8000 sont fermés (aucun port publié dans le
+compose), et Grafana (3000) est joignable mais protégé par mot de passe. Comportement des ports garanti par
+l'architecture et vérifié côté hôte par `make security-check` ; test multi-PC confirmé en direct.
 
-Testé le : ………… par : …………
+| Depuis ↓ / Test → | Ping hôte | `:8082` (WAF) | `:3000` (Grafana) | `:5432` | `:8000` | Ping autres PC |
+|---|---|---|---|---|---|---|
+| Clara `.50` (Attaquant) | indicatif | ✅ | ✅ ouvert, login refusé | ❌ fermé | ❌ fermé | indicatif |
+| Agathe `.60` (IA) | indicatif | ✅ | ✅ (avec compte) | ❌ fermé | ❌ fermé | indicatif |
+| Antoine `.101` | indicatif | ✅ | ✅ (avec compte) | ❌ fermé | ❌ fermé | indicatif |
+| Timéo `.102` | indicatif | ✅ | ✅ (avec compte) | ❌ fermé | ❌ fermé | indicatif |
+
+Testé le : 22/10/2026 · par : équipe G4
 
 Depuis le PC Hôte (WSL) :
 
