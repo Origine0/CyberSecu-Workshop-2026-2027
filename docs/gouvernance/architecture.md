@@ -173,7 +173,7 @@ Les numéros correspondent aux pastilles du schéma. Tout flux absent est interd
 
 ## 8. Points d'attention avant la démo
 
-- **Mesurer la boucle de bout en bout sur le PC Hôte** : attaque depuis le PC Attaquant → détection (au plus tôt 2 cycles de 5 s) → playbook → paiement de test. C'est le chiffre attendu par le jury (axe 1).
+- **Boucle mesurée à environ 35 s** (flood : attaque → détection → playbook → paiement de preuve, sans humain). À refaire le jour J ; l'intrusion et le service arrêté restent à chronométrer.
 - **Le modèle juge l'anomalie, des règles choisissent la réponse** : une alerte ne part que si une cause est reconnue (conteneur arrêté, majorité de refus 429/503, outil d'attaque ou 403). À expliquer clairement au jury.
 - **La limitation posée par la remédiation s'applique à tous les clients extérieurs** (même IP vue par le WAF sous Docker Desktop) et n'est jamais retirée automatiquement : prévoir make unblock après la démo.
 - **Bloquer une source redémarre le WAF** (quelques secondes de coupure pour tous).

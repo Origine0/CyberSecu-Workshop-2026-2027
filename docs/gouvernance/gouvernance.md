@@ -1,6 +1,6 @@
 # Dossier de gouvernance : continuité, risques et conformité
 
-> PROJECT RESILIENCE-ALPHA • Groupe G4 • 21/10/2026 (code main bd635b8) • Rédaction : Timéo (Lead Transformation & PMO)
+> PROJECT RESILIENCE-ALPHA • Groupe G4 • 22/10/2026 (code main bd635b8, boucle mesurée à ≈ 35 s) • Rédaction : Timéo (Lead Transformation & PMO)
 > BIA • PCA/PRA • EBIOS RM ateliers 2 à 5 • NIS2/DORA • Recommandations. Mesures réalisées sur la stack réelle.
 
 ## 0. L'essentiel en une page
@@ -17,9 +17,9 @@ Ce dossier couvre la partie **gouvernance** exigée par le sujet (section 3.5) :
 | Flood de Clara (400 requêtes, 690/s) | **90,2 % rejetées**, service maintenu | La limitation de débit absorbe l'attaque, même avec de fausses IP… |
 | Client légitime extérieur pendant le flood | **4 paiements sur 25 refusés** | … mais touche aussi les vrais clients (même IP vue par le WAF) |
 | Force brute sur un compte (40 essais) | **verrouillé après 5 échecs** | 35 tentatives sur 40 refusées, événement LOGIN_LOCKED journalisé |
-| Boucle détection → réparation | **en place, à chronométrer** | Détecteur ML toutes les 5 s → moteur → playbook Ansible → paiement de test, sans humain |
+| Boucle détection → réparation (flood) | **≈ 35 s, sans humain** | Attaque → détection ML → playbook Ansible → paiement de preuve (mesuré par l'équipe le 22/10) |
 
-**À retenir :** 1 minute d'arrêt coûte environ **346 € de commissions** et bloque **28 800 € de paiements** pour nos marchands. Nos reprises mesurées se comptent en secondes. Depuis le 20/10, l'équipe a mis en service la **réparation automatique pilotée par la détection**, l'authentification, et corrigé l'usurpation d'IP. Il reste à **chronométrer la boucle de bout en bout sur le PC Hôte** ; notre point faible structurel reste l'absence de **sauvegardes**.
+**À retenir :** 1 minute d'arrêt coûte environ **346 € de commissions** et bloque **28 800 € de paiements** pour nos marchands. Nos reprises mesurées se comptent en secondes. Depuis le 20/10, l'équipe a mis en service la **réparation automatique pilotée par la détection**, l'authentification, et corrigé l'usurpation d'IP. La boucle répare une attaque en **environ 35 s**, sous l'objectif de 2 min ; notre point faible structurel reste l'absence de **sauvegardes**.
 
 ## 1. Analyse d'impact (BIA) : combien coûte un arrêt des paiements
 
@@ -40,6 +40,7 @@ Les chiffres de l'entreprise sont **fictifs** (le sujet l'impose) mais réaliste
 | Durée | Paiements bloqués | Flux bloqué (marchands) | Commissions perdues | Pénalités | Crise | Coût pour nous | Gravité EBIOS |
 |---|---|---|---|---|---|---|---|
 | 0,3 s (crash mesuré) | 3 | 144 € | 2 € | — | — | **2 €** | G1 |
+| **35 s (boucle mesurée)** | 350 | 16 800 € | 202 € | — | — | **202 €** | G2 |
 | **2 min (RTO cible)** | 1 200 | 57 600 € | 691 € | — | — | **691 €** | G2 |
 | 15 min | 9 000 | 432 000 € | 5 184 € | — | 90 € | **5 274 €** | G3 |
 | 1 h | 36 000 | 1 728 000 € | 20 736 € | 5 000 € | 360 € | **26 096 €** | G3 |
@@ -55,8 +56,8 @@ Les chiffres de l'entreprise sont **fictifs** (le sujet l'impose) mais réaliste
 |---|---|---|---|
 | **RTO** : durée maximale d'arrêt | **2 min** | Coût encore limité (~700 €), avant les pénalités | 0,2 s (crash API), 0,3 s (crash base) |
 | **RPO** : perte de données maximale | **0 paiement validé** | Un paiement confirmé perdu = litige client | 0 paiement accepté perdu sur crash de la base |
-| Temps de détection | < 30 s | Laisser le temps de réparer et vérifier dans le RTO | À mesurer : au plus tôt 10 s par conception (2 analyses de 5 s) |
-| **RTO d'une attaque** (détection → réparation → preuve) | **2 min** | C'est ce que verra le jury | À mesurer sur le PC Hôte |
+| Temps de détection | < 30 s | Laisser le temps de réparer et vérifier dans le RTO | Au plus tôt 10 s par conception (2 analyses de 5 s), compris dans les 35 s mesurés |
+| **RTO d'une attaque** (détection → réparation → preuve) | **2 min** | C'est ce que verra le jury | **≈ 35 s** (flood, mesuré le 22/10) |
 
 ## 2. Plan de continuité et de reprise (PCA/PRA)
 
@@ -66,7 +67,7 @@ Le **PCA** décrit comment le service **continue** pendant l'incident, le **PRA*
 
 | Scénario | Ce qui se passe | Réponse (automatique ou procédure) | Résultat mesuré | Couvert ? |
 |---|---|---|---|---|
-| S1 - Flood sur /api/pay (SC-01, ER1) | Attaque depuis le PC Attaquant (red_attack.py --mode flood) | Double WAF : limitation de débit du WAF applicatif (40 requêtes / 2 s par client), puis automatiquement : détection ML → alerte dos → limitation dans le WAF nginx | 90,2 % de l'attaque rejetée, service maintenu. 4/25 clients légitimes refusés. Boucle complète à chronométrer | ⚠️ Partiel |
+| S1 - Flood sur /api/pay (SC-01, ER1) | Attaque depuis le PC Attaquant (red_attack.py --mode flood) | Double WAF : limitation de débit du WAF applicatif (40 requêtes / 2 s par client), puis automatiquement : détection ML → alerte dos → limitation dans le WAF nginx | 90,2 % de l'attaque rejetée, service maintenu. Boucle complète : ≈ 35 s. 4/25 clients légitimes refusés | ⚠️ Partiel |
 | S2 - Crash de l'API | Le processus de payment-api s'arrête | Docker relance le conteneur (restart: unless-stopped) | 0,2 s d'indisponibilité | ✅ Fait |
 | S3 - Crash de la base | Arrêt brutal de PostgreSQL | Docker relance PostgreSQL, rejeu du journal (WAL) | 0,3 s, 2 paiements refusés, 0 paiement accepté perdu | ✅ Fait |
 | S3b - Force brute sur un compte (ER3) | Des milliers de mots de passe testés sur /auth/login | Verrouillage après 5 échecs par compte, journalisé (LOGIN_LOCKED) | 35 tentatives sur 40 refusées (429) | ✅ Fait |
@@ -112,7 +113,7 @@ Les playbooks tournent dans le conteneur *remediation*. Ils ne peuvent agir sur 
 | **Effet collatéral de la limitation de débit** | Pendant un flood, des clients légitimes extérieurs sont refusés (4/25 mesurés) | Accepté temporairement, à traiter (R3) |
 | **Verrouillage de compte détournable** | Tous les clients extérieurs ont la même IP vue par le WAF : 5 faux mots de passe suffisent à bloquer le compte d'un vrai client | Accepté pour le prototype (R3) |
 | **Paiements anonymes acceptés** | REQUIRE_AUTH=false : un paiement sans jeton passe, sans débit de compte (utile au générateur de trafic) | À dire au jury ; à activer en production |
-| **Boucle non chronométrée** | La boucle détection → réparation existe mais son temps de bout en bout n'a pas encore été mesuré | À mesurer sur le PC Hôte avant vendredi (R1) |
+| **Boucle mesurée une seule fois** | ≈ 35 s sur le flood ; l'intrusion et le service arrêté n'ont pas été chronométrés | Refaire la mesure le jour J (R1) |
 | **Limitation de la remédiation commune à tous** | La règle posée après un flood limite tous les clients extérieurs (même IP vue par le WAF) et n'est jamais retirée automatiquement | make unblock après l'incident ; retrait automatique à prévoir |
 | **Réponse choisie par des règles** | Le modèle juge l'anomalie, mais une alerte ne part que si une cause est reconnue (conteneur arrêté, refus 429/503, outil d'attaque) | Accepté : à expliquer au jury |
 | **Blocage = redémarrage du WAF** | Appliquer une règle coupe le service quelques secondes pour tout le monde | À corriger (rechargement sans redémarrage) |
@@ -151,7 +152,7 @@ Version courte, reliée au démonstrateur. Elle reprend les valeurs métier (VM1
 | 2. Attaque | Lance red_attack.py --mode flood : 400 requêtes, 25 en parallèle, 690 requêtes/s | Le WAF applicatif répond 429 à 90,2 % des requêtes |
 | 3. Effet | Cherche à saturer l'API et la base | Le service reste disponible ; 4 clients légitimes sur 25 refusés au passage |
 | 4. Tentative de contournement | Change de fausse IP à chaque requête (en-tête X-Forwarded-For) | Sans effet : le WAF réécrit l'en-tête (20 requêtes sur 60 bloquées malgré 60 fausses IP) |
-| 5. Réparation automatique | — | Détection ML (2 analyses de 5 s) → alerte dos → playbook *block_source* (limitation dans le WAF) → paiement de test : **en place, à chronométrer** |
+| 5. Réparation automatique | — | Détection ML (2 analyses de 5 s) → alerte dos → playbook *block_source* (limitation dans le WAF) → paiement de test : **≈ 35 s, sans humain** |
 
 **Vraisemblance : V3 (très vraisemblable)** : l'outil est simple. **Gravité résiduelle : G2** : l'attaque est absorbée, mais des clients légitimes sont gênés. Les autres scénarios du rapport de Clara sont traités ainsi : SC-02 (fuzzing) par la validation des données, SC-03 (fuite d'informations) par le masquage des erreurs, SC-04 (chaos) uniquement en test interne.
 
@@ -159,7 +160,7 @@ Version courte, reliée au démonstrateur. Elle reprend les valeurs métier (VM1
 
 | Risque | Mesure | Responsable | Échéance | Risque résiduel |
 |---|---|---|---|---|
-| ER1 Flood | **Fait** : X-Forwarded-For réécrit par le WAF ; détection ML branchée sur les playbooks. **Reste** : chronométrer la boucle | Mélanie, Clara | Jeudi 17 h | Effet collatéral sur les clients extérieurs (Docker Desktop) |
+| ER1 Flood | **Fait** : X-Forwarded-For réécrit par le WAF ; boucle détection → playbooks mesurée à ≈ 35 s. **Reste** : retrait automatique de la limitation | Mélanie, Clara | Après le workshop | Effet collatéral sur les clients extérieurs (Docker Desktop) |
 | ER2 Paiement faux | **Fait** : débit du solde et refus si solde insuffisant. **Reste** : clé d'idempotence obligatoire | Antoine | Après le workshop | Paiements anonymes sans débit |
 | ER3 Compte client | **Fait** : service auth (scrypt, JWT) et verrouillage après 5 échecs. **Reste** : REQUIRE_AUTH=true en production | Antoine | Après le workshop | Verrouillage détournable contre un vrai client |
 | ER4 Secrets | Passer des variables d'environnement aux fichiers /run/secrets ; ne plus partager le secret JWT avec payment-api (RS256) | Clara, Antoine | Si le temps le permet | Secrets visibles avec docker inspect |
@@ -172,7 +173,7 @@ La version du 19/10 annonçait des protections prévues dans l'architecture. Voi
 
 | Risque | Gravité | Protection annoncée le 19/10 | État réel au 21/10 (testé) | Statut |
 |---|---|---|---|---|
-| ER1 Les paiements ne passent plus | G3 | WAF qui limite le débit, détection ML, IP bannie | Limitation de débit non contournable (90,2 % du flood rejeté, même avec de fausses IP) ; boucle ML → limitation dans le WAF en place (à chronométrer) ; bannir une IP impossible sous Docker Desktop | ⚠️ Partiel |
+| ER1 Les paiements ne passent plus | G3 | WAF qui limite le débit, détection ML, IP bannie | Limitation de débit non contournable (90,2 % du flood rejeté, même avec de fausses IP) ; boucle ML → limitation dans le WAF en ≈ 35 s ; bannir une IP impossible sous Docker Desktop | ⚠️ Partiel |
 | ER2 Un paiement est faux | G4 | Paiement en une requête avec contrôle du solde | Paiement authentifié : solde débité, refus si insuffisant (testé). Contrainte « solde positif » et clé d'idempotence unique en base. Mais clé facultative et paiements anonymes acceptés | ⚠️ Partiel |
 | ER3 Un pirate entre dans un compte | G3 | Essais limités sur /login, détection ML | Service auth en place : mots de passe scrypt, jeton JWT (falsifié = 401), verrouillage après 5 échecs (35/40 essais refusés, testé) | ✅ Fait |
 | ER4 Vol de nos secrets | G4 | Secrets chiffrés SOPS, clé JWT seulement dans auth | SOPS + age en place, .env hors de Git. Secrets en variables d'environnement ; secret JWT partagé entre auth et payment-api | ⚠️ Partiel |
@@ -188,7 +189,7 @@ Pour une entité financière, **DORA** (règlement (UE) 2022/2554) s'applique en
 |---|---|---|---|
 | Cadre de gestion du risque TIC (art. 5 à 9) | Inventaire des actifs (architecture, plan d'adressage), analyse EBIOS RM, durcissement des conteneurs, réseaux isolés | Implication de l'organe de direction, politique formelle validée | ⚠️ Partiel |
 | Détection (art. 10) | Isolation Forest appliqué toutes les 5 s aux journaux de la plateforme ; supervision Prometheus, Loki, Grafana | Performance en conditions réelles (faux positifs sur la durée) | ✅ Fait |
-| Réponse et rétablissement (art. 11) | Réponse automatique détection → playbook → preuve par transaction ; reprises sur crash mesurées (0,2 s et 0,3 s) | Temps de reprise d'une attaque complète (à mesurer) | ⚠️ Partiel |
+| Réponse et rétablissement (art. 11) | Réponse automatique en ≈ 35 s (flood) avec preuve par transaction ; reprises sur crash en 0,2 s et 0,3 s | Fiabilité sur la durée (une seule mesure de bout en bout) | ✅ Fait |
 | Sauvegarde et restauration (art. 12) | Aucune perte sur crash de la base (journal WAL) | Sauvegardes, restauration depuis une copie, site de secours | ❌ Absent |
 | Gestion et classification des incidents (art. 17 et 18) | Journal d'audit en base (service_audit_logs, dont LOGIN_LOCKED), journaux centralisés dans Loki | Processus de classification, critères d'incident majeur | ⚠️ Partiel |
 | Notification des incidents majeurs (art. 19) | Les données nécessaires existent (heure, durée, impact mesuré) | Notification réelle à l'autorité (en France : l'ACPR) | ❌ Absent |
@@ -206,7 +207,7 @@ Ce que nous ferions dans un contexte industriel, par ordre de priorité. Chaque 
 
 | # | Recommandation | Pourquoi (preuve) | Effort | Indicateur de succès |
 |---|---|---|---|---|
-| **R1** | **Éprouver la réparation automatique** : la chronométrer, la tester chaque mois et retirer automatiquement les limitations posées | La boucle existe depuis le 20/10 mais n'a pas été chronométrée ; la limitation posée reste en place pour tous les clients | Faible | Incident détecté et réparé sans humain en moins de 2 min, mesuré en test mensuel |
+| **R1** | **Éprouver la réparation automatique** : la chronométrer, la tester chaque mois et retirer automatiquement les limitations posées | La boucle répare un flood en ≈ 35 s, mais n'a été mesurée qu'une fois ; la limitation posée reste en place pour tous les clients | Faible | Incident détecté et réparé sans humain en moins de 2 min, mesuré en test mensuel |
 | **R2** | **Sauvegarder la base hors du serveur et ajouter un second site** | Une panne du PC ou du disque = perte totale (S7). DORA art. 12 non couvert | Moyen à élevé (budget infra) | RPO de 15 min garanti, restauration testée chaque trimestre |
 | **R3** | **Placer le pare-feu en frontal et exiger l'authentification** (REQUIRE_AUTH, MFA) | Le WAF ne voit pas les vraies IP : la limitation touche les vrais clients (4/25) et un attaquant peut verrouiller le compte d'un client | Moyen | 0 client légitime refusé pendant un flood |
 | **R4** | **Formaliser la gestion des incidents DORA** : classification, notification, exercices de crise | Les données existent mais aucun processus n'existe pour notifier dans les délais | Faible | Exercice de crise semestriel, notification simulée en moins de 4 h |
