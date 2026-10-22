@@ -1,4 +1,10 @@
-import type { Transaction, HealthCheckResponse, WafStatusResponse } from '../types/index.ts';
+import type { 
+  Transaction, 
+  HealthCheckResponse, 
+  WafStatusResponse,
+  AiAnalyzeResponse,
+  AiAskResponse
+} from '../types/index.ts';
 import { INITIAL_MERCHANTS } from './paymentEngine.ts';
 
 // URLs relatives : en conteneur le WAF route /api, /auth et /ai ; en `npm run dev` local, le proxy Vite fait pareil.
@@ -32,6 +38,7 @@ export interface Account {
   balance: number;
   currency: string;
   status: string;
+  role?: string;
 }
 
 export interface RemotePaymentResponse {
@@ -128,7 +135,7 @@ export async function fetchHealth(isDegradedOverride = false): Promise<HealthChe
   const start = performance.now();
   const raw = await request<BackendHealthRaw>(`${API_BASE}/health`, {
     signal: AbortSignal.timeout(2500),
-  });
+  }, true);
   const rttMs = Math.max(1, Math.round((performance.now() - start) * 10) / 10);
 
   const isUp = raw.status === 'UP' && raw.database === 'healthy';
@@ -166,7 +173,7 @@ export async function fetchHealth(isDegradedOverride = false): Promise<HealthChe
 export async function fetchTransactions(limit = 35): Promise<Transaction[]> {
   const rows = await request<BackendTransactionRaw[]>(`${API_BASE}/transactions?limit=${limit}`, {
     signal: AbortSignal.timeout(2500),
-  });
+  }, true);
 
   return rows.map((r, index) => {
     const meta = r.metadata || {};
@@ -214,5 +221,33 @@ export async function fetchTransactions(limit = 35): Promise<Transaction[]> {
 export async function fetchWafStatus(): Promise<WafStatusResponse> {
   return request<WafStatusResponse>(`${API_BASE}/waf/status`, {
     signal: AbortSignal.timeout(2500),
+  }, true);
+}
+
+
+/**
+ * Analyse télémétrique temps réel par le modèle Isolation Forest (/ai/analyze)
+ */
+export async function analyzeTelemetry(payload: {
+  timestamp: string;
+  request_rate: number;
+  error_rate: number;
+  latency_ms: number;
+}): Promise<AiAnalyzeResponse> {
+  return request<AiAnalyzeResponse>(`${AI_BASE}/analyze`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(4000),
+  });
+}
+
+/**
+ * Interroge l'assistant RAG (FAISS + Ollama) sur les procédures cyber (/ai/ask)
+ */
+export async function askRag(query: string): Promise<AiAskResponse> {
+  return request<AiAskResponse>(`${AI_BASE}/ask`, {
+    method: 'POST',
+    body: JSON.stringify({ query }),
+    signal: AbortSignal.timeout(45000),
   });
 }

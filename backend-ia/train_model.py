@@ -5,8 +5,8 @@ PROJECT RESILIENCE-ALPHA — Pipeline d'Apprentissage & Calibration IA (AIOps)
 ==============================================================================
 Auteure : Agathe (Lead Développeuse IA & Data)
 Spécialité : Détection d'anomalies de trafic sans règles en dur (M2 Cybersécurité)
-Algorithme : Isolation Forest (Scikit-Learn)
-Corpus : Métriques télémétriques de l'API de Paiement & Profils d'Attaques Red Team
+Algorithme : Isolation Forest (Scikit-Learn 1.9.1 / NumPy 1.26.4)
+Calibration : Trafic opérationnel réel (0.5 req/s nominal) vs Attaques Red Team L7
 ==============================================================================
 """
 
@@ -41,24 +41,24 @@ FEATURES = ["request_rate", "error_rate", "latency_ms"]
 
 def generate_extended_dataset(n_samples: int = 1500, seed: int = 42) -> pd.DataFrame:
     """
-    Génère un jeu de données calibré sur le comportement réel observé :
+    Génère un jeu de données rigoureusement calibré sur le démonstrateur réel :
     1. Trafic Nominal (82%) :
-       - Heures creuses : 10-20 req/s, 0.0% - 1.0% erreurs, 20-30ms
-       - Heures ouvrées : 20-45 req/s, 0.5% - 2.0% erreurs, 28-45ms
-       - Pic d'affluence légitime : 45-70 req/s, 1.0% - 3.0% erreurs, 38-65ms
+       - Heures creuses : 0.2 - 0.4 req/s, 0.0% erreurs, 18-28 ms
+       - Régime nominal standard : 0.4 - 0.7 req/s (moyenne 0.5 req/s, 1 tx/2s), 22-38 ms
+       - Pic d'activité légitime : 0.8 - 1.8 req/s, erreurs < 1.5%, 30-55 ms
     2. Vecteurs d'Attaques Red Team (18%) :
-       - Flood L7 (DDoS) : > 100 req/s, rejets WAF, latence accrue
-       - Fuzzing 422 : volume normal, rejets massifs HTTP 422 (> 60%)
-       - Chaos 500 / Timeout : latences extrêmes (> 350ms) et erreurs 500
-       - Furtif / Stealth : volume nominal mais micro-dérives
+       - Flood L7 (DDoS de Clara) : 12 à 60+ req/s (25x à 120x le nominal !), latence 350-2500 ms
+       - Fuzzing 422 : 1 à 4 req/s, rejets massifs HTTP 422 (> 60%)
+       - Chaos 500 / Timeout : latences extrêmes (> 500 ms) et erreurs 500 (> 50%)
+       - Furtif / Low-and-Slow : micro-dérives (2.5 à 5 req/s, latence 90-160 ms)
     """
     np.random.seed(seed)
     records = []
     
     n_nominal = int(n_samples * 0.82)
     n_attacks = n_samples - n_nominal
-    n_flood = int(n_attacks * 0.35)
-    n_fuzzing = int(n_attacks * 0.30)
+    n_flood = int(n_attacks * 0.40)
+    n_fuzzing = int(n_attacks * 0.25)
     n_chaos = int(n_attacks * 0.20)
     n_stealth = n_attacks - (n_flood + n_fuzzing + n_chaos)
     
@@ -66,74 +66,75 @@ def generate_extended_dataset(n_samples: int = 1500, seed: int = 42) -> pd.DataF
     for _ in range(n_nominal):
         profile = np.random.choice(["quiet", "regular", "busy"], p=[0.25, 0.55, 0.20])
         if profile == "quiet":
-            req_rate = float(np.random.normal(loc=16.0, scale=3.5))
-            err_rate = float(np.random.beta(0.5, 60.0)) * 0.8
-            lat_ms = float(np.random.normal(loc=24.0, scale=3.5))
+            req_rate = float(np.random.normal(loc=0.32, scale=0.06))
+            err_rate = float(np.random.beta(0.2, 90.0)) * 0.005
+            lat_ms = float(np.random.normal(loc=22.0, scale=3.0))
         elif profile == "regular":
-            req_rate = float(np.random.normal(loc=35.0, scale=6.0))
-            err_rate = float(np.random.beta(0.8, 50.0)) * 1.0
-            lat_ms = float(np.random.normal(loc=35.0, scale=5.0))
-        else: # busy
-            req_rate = float(np.random.normal(loc=55.0, scale=7.5))
-            err_rate = float(np.random.beta(1.0, 45.0)) * 1.2
-            lat_ms = float(np.random.normal(loc=48.0, scale=6.5))
+            # Conforme au trafic_gen réel (1 requête toutes les 2 secondes = 0.50 req/s)
+            req_rate = float(np.random.normal(loc=0.50, scale=0.10))
+            err_rate = float(np.random.beta(0.5, 70.0)) * 0.008
+            lat_ms = float(np.random.normal(loc=28.0, scale=4.5))
+        else: # busy (affluence légitime)
+            req_rate = float(np.random.normal(loc=1.15, scale=0.25))
+            err_rate = float(np.random.beta(0.8, 50.0)) * 0.015
+            lat_ms = float(np.random.normal(loc=38.0, scale=6.0))
             
         records.append({
-            "request_rate": max(8.0, min(round(req_rate, 2), 80.0)),
-            "error_rate": max(0.0, min(round(err_rate, 4), 0.035)),
-            "latency_ms": max(15.0, min(round(lat_ms, 2), 75.0)),
+            "request_rate": max(0.10, min(round(req_rate, 3), 1.95)),
+            "error_rate": max(0.0, min(round(err_rate, 4), 0.020)),
+            "latency_ms": max(15.0, min(round(lat_ms, 2), 65.0)),
             "attack_type": "NOMINAL",
             "label": 0
         })
 
-    # 2. VECTEUR A : FLOOD L7 (DDoS)
+    # 2. VECTEUR A : FLOOD L7 (DDoS de Clara)
     for _ in range(n_flood):
-        req_rate = float(np.random.normal(loc=190.0, scale=40.0))
-        err_rate = float(np.random.uniform(0.20, 0.60))
-        lat_ms = float(np.random.normal(loc=250.0, scale=55.0))
+        req_rate = float(np.random.normal(loc=28.0, scale=8.0))
+        err_rate = float(np.random.uniform(0.25, 0.85))
+        lat_ms = float(np.random.normal(loc=550.0, scale=180.0))
         records.append({
-            "request_rate": max(90.0, round(req_rate, 2)),
+            "request_rate": max(8.0, round(req_rate, 2)),
             "error_rate": round(err_rate, 4),
-            "latency_ms": max(110.0, round(lat_ms, 2)),
+            "latency_ms": max(120.0, round(lat_ms, 2)),
             "attack_type": "DDOS_L7_FLOOD",
             "label": 1
         })
 
     # 3. VECTEUR B : FUZZING / PAYLOADS MALFORMÉS (422)
     for _ in range(n_fuzzing):
-        req_rate = float(np.random.normal(loc=35.0, scale=8.0))
-        err_rate = float(np.random.uniform(0.65, 0.99))
-        lat_ms = float(np.random.normal(loc=30.0, scale=5.0))
+        req_rate = float(np.random.normal(loc=1.8, scale=0.5))
+        err_rate = float(np.random.uniform(0.60, 0.99))
+        lat_ms = float(np.random.normal(loc=32.0, scale=5.0))
         records.append({
-            "request_rate": max(15.0, min(round(req_rate, 2), 60.0)),
+            "request_rate": max(0.6, min(round(req_rate, 2), 4.5)),
             "error_rate": round(err_rate, 4),
-            "latency_ms": max(18.0, min(round(lat_ms, 2), 50.0)),
+            "latency_ms": max(18.0, min(round(lat_ms, 2), 55.0)),
             "attack_type": "FUZZING_422",
             "label": 1
         })
 
     # 4. VECTEUR C : CHAOS ENGINEERING / DB TIMEOUT (500)
     for _ in range(n_chaos):
-        req_rate = float(np.random.normal(loc=26.0, scale=6.0))
-        err_rate = float(np.random.uniform(0.40, 0.90))
-        lat_ms = float(np.random.normal(loc=850.0, scale=200.0))
+        req_rate = float(np.random.normal(loc=0.8, scale=0.3))
+        err_rate = float(np.random.uniform(0.45, 0.95))
+        lat_ms = float(np.random.normal(loc=1100.0, scale=300.0))
         records.append({
-            "request_rate": max(10.0, round(req_rate, 2)),
+            "request_rate": max(0.2, round(req_rate, 2)),
             "error_rate": round(err_rate, 4),
-            "latency_ms": max(350.0, round(lat_ms, 2)),
+            "latency_ms": max(400.0, round(lat_ms, 2)),
             "attack_type": "CHAOS_TIMEOUT_500",
             "label": 1
         })
 
     # 5. VECTEUR D : LOW-AND-SLOW (Attaque furtive)
     for _ in range(n_stealth):
-        req_rate = float(np.random.normal(loc=38.0, scale=5.0))
-        err_rate = float(np.random.uniform(0.08, 0.20))
-        lat_ms = float(np.random.normal(loc=110.0, scale=20.0))
+        req_rate = float(np.random.normal(loc=3.2, scale=0.6))
+        err_rate = float(np.random.uniform(0.06, 0.18))
+        lat_ms = float(np.random.normal(loc=115.0, scale=20.0))
         records.append({
-            "request_rate": round(req_rate, 2),
+            "request_rate": max(2.2, round(req_rate, 2)),
             "error_rate": round(err_rate, 4),
-            "latency_ms": round(lat_ms, 2),
+            "latency_ms": max(75.0, round(lat_ms, 2)),
             "attack_type": "STEALTH_INTRUSION",
             "label": 1
         })
@@ -148,172 +149,127 @@ def train_and_evaluate_isolation_forest(
     random_state: int = 42
 ) -> Tuple[IsolationForest, Dict[str, Any]]:
     """
-    Entraîne le modèle non supervisé Isolation Forest sur le profil nominal pur (label == 0)
-    et valide sa capacité de généralisation sur l'ensemble complet (normal + attaques).
+    Entraîne l'Isolation Forest sans règles en dur et calcule les métriques d'évaluation.
     """
-    n_total = len(df)
-    n_attacks = int(df["label"].sum())
-    n_nominal = n_total - n_attacks
-
-    # En apprentissage semi-supervisé / non-supervisé par arbre d'isolation,
-    # le paramètre de contamination optimal est la proportion réelle d'outliers dans le corpus.
-    contamination = round(float(n_attacks / n_total), 4)
+    X = df[FEATURES]
+    y_true = df["label"].values
     
-    print(f"[+] Données disponibles : {n_total} échantillons ({n_nominal} nominaux, {n_attacks} attaques)")
-    print(f"[+] Taux de contamination empirique calibré : {contamination:.4f} ({contamination*100:.2f}%)")
-
-    # Fit sur l'ensemble de l'espace métrique pour apprendre la topologie globale
-    X_train = df[FEATURES]
-    X_full = df[FEATURES]
-    y_true = df["label"].values # 0 = normal, 1 = attaque
-
-    # 2. Instanciation & Ajustement de l'Isolation Forest
-    start_train_time = time.perf_counter()
-    clf = IsolationForest(
+    contamination_rate = float(y_true.sum() / len(y_true))
+    
+    # Instanciation de l'Isolation Forest
+    iso_forest = IsolationForest(
         n_estimators=n_estimators,
-        max_samples="auto",
-        contamination=contamination,
+        contamination=contamination_rate,
         random_state=random_state,
         n_jobs=-1
     )
-    clf.fit(X_train)
-    training_duration_ms = round((time.perf_counter() - start_train_time) * 1000, 2)
-
-    # 3. Inférence & Calcul des métriques de détection
-    start_inf_time = time.perf_counter()
-    preds_raw = clf.predict(X_full)
-    inf_duration_total_ms = (time.perf_counter() - start_inf_time) * 1000
-    latency_per_sample_us = round((inf_duration_total_ms / n_total) * 1000, 2)
-
-    # Conversion en binaire Cyber SOC : 0 = Nominal, 1 = Attaque détectée
-    y_pred = np.where(preds_raw == -1, 1, 0)
-    decision_scores = clf.decision_function(X_full)
-
-    # 4. Matrice de Confusion & Scores
-    cm = confusion_matrix(y_true, y_pred)
-    tn, fp, fn, tp = cm.ravel()
     
-    precision, recall, f1, _ = precision_recall_fscore_support(
-        y_true, y_pred, average="binary", pos_label=1
-    )
-    anomaly_probability = -decision_scores
-    roc_auc = float(roc_auc_score(y_true, anomaly_probability))
-    pr_auc = float(average_precision_score(y_true, anomaly_probability))
-    false_positive_rate = float(fp / (fp + tn)) if (fp + tn) > 0 else 0.0
-
-    # Analyse par vecteur d'attaque
-    attack_breakdown = {}
-    if "attack_type" in df.columns:
-        for atype in df["attack_type"].unique():
-            subset_mask = df["attack_type"] == atype
-            sub_total = int(subset_mask.sum())
-            sub_detected = int((y_pred[subset_mask] == 1).sum()) if atype != "NOMINAL" else int((y_pred[subset_mask] == 0).sum())
-            ratio = round(sub_detected / sub_total * 100, 1) if sub_total > 0 else 0.0
-            attack_breakdown[atype] = {
-                "total": sub_total,
-                "correctly_classified": sub_detected,
-                "success_rate_pct": ratio
-            }
-
-    metrics_report = {
-        "model_type": "Isolation Forest (Scikit-Learn)",
-        "features": FEATURES,
-        "n_estimators": n_estimators,
-        "contamination": round(contamination, 4),
-        "dataset_size": n_total,
-        "nominal_samples": n_nominal,
-        "attack_samples": n_attacks,
-        "training_duration_ms": training_duration_ms,
-        "inference_latency_us_per_sample": latency_per_sample_us,
-        "classification_metrics": {
+    start_time = time.perf_counter()
+    iso_forest.fit(X)
+    training_time_ms = round((time.perf_counter() - start_time) * 1000, 2)
+    
+    # Inférence : 1 = inlier (nominal 0), -1 = outlier (anomalie 1)
+    raw_preds = iso_forest.predict(X)
+    y_pred = np.where(raw_preds == -1, 1, 0)
+    
+    anomaly_scores = -iso_forest.score_samples(X)
+    
+    precision, recall, f1, _ = precision_recall_fscore_support(y_true, y_pred, average="binary")
+    roc_auc = roc_auc_score(y_true, anomaly_scores)
+    pr_auc = average_precision_score(y_true, anomaly_scores)
+    
+    tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+    fpr = float(fp / (fp + tn)) if (fp + tn) > 0 else 0.0
+    fnr = float(fn / (fn + tp)) if (fn + tp) > 0 else 0.0
+    
+    # Mesure de latence d'inférence (1000 échantillons)
+    sample_bench = X.iloc[:1000]
+    bench_start = time.perf_counter()
+    _ = iso_forest.predict(sample_bench)
+    bench_duration = time.perf_counter() - bench_start
+    latency_per_sample_us = round((bench_duration / len(sample_bench)) * 1_000_000, 2)
+    
+    metrics = {
+        "dataset_summary": {
+            "total_samples": len(df),
+            "nominal_samples": int((y_true == 0).sum()),
+            "attack_samples": int((y_true == 1).sum()),
+            "nominal_request_rate_mean": round(float(df[df["label"] == 0]["request_rate"].mean()), 3),
+            "contamination_rate": round(contamination_rate, 4),
+            "features": FEATURES
+        },
+        "performance_metrics": {
+            "accuracy": round(float((tp + tn) / len(y_true)), 4),
             "precision": round(float(precision), 4),
             "recall": round(float(recall), 4),
             "f1_score": round(float(f1), 4),
             "roc_auc": round(float(roc_auc), 4),
             "pr_auc": round(float(pr_auc), 4),
-            "false_positive_rate": round(float(false_positive_rate), 4)
+            "false_positive_rate": round(fpr, 4),
+            "false_negative_rate": round(fnr, 4)
         },
         "confusion_matrix": {
-            "true_negatives_nominal": int(tn),
-            "false_positives_false_alarms": int(fp),
-            "false_negatives_missed_attacks": int(fn),
-            "true_positives_detected_attacks": int(tp)
+            "true_negatives": int(tn),
+            "false_positives": int(fp),
+            "false_negatives": int(fn),
+            "true_positives": int(tp)
         },
-        "vector_breakdown": attack_breakdown,
-        "decision_threshold_info": {
-            "min_score": round(float(decision_scores.min()), 4),
-            "max_score": round(float(decision_scores.max()), 4),
-            "mean_score_nominal": round(float(decision_scores[y_true == 0].mean()), 4),
-            "mean_score_attack": round(float(decision_scores[y_true == 1].mean()), 4)
+        "benchmarks": {
+            "training_time_ms": training_time_ms,
+            "inference_latency_per_sample_us": latency_per_sample_us,
+            "n_estimators": n_estimators,
+            "runtime_environment": {
+                "scikit_learn_version": joblib.__name__,
+                "algorithm": "IsolationForest"
+            }
         },
-        "trained_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        "operational_thresholds": {
+            "nominal_rate_expected": 0.5,
+            "attack_flood_detected_min_rate": 8.0,
+            "action_trigger": "TRIGGER_REMEDIATION"
+        }
     }
-
-    return clf, metrics_report
-
-
-def print_scientific_report(metrics: Dict[str, Any]):
-    """Affiche un rapport technique détaillé pour le jury de soutenance."""
-    m = metrics["classification_metrics"]
-    cm = metrics["confusion_matrix"]
     
-    print("\n" + "=" * 70)
-    print(" 🏆 RAPPORT SCIENTIFIQUE D'ENTRAÎNEMENT & VALIDATION IA (BAC+5)")
-    print(" PROJECT RESILIENCE-ALPHA — PILIER IA & DATA")
-    print("=" * 70)
-    print(f" Modèle               : {metrics['model_type']} ({metrics['n_estimators']} arbres)")
-    print(f" Features analysées   : {', '.join(metrics['features'])}")
-    print(f" Corpus d'évaluation  : {metrics['dataset_size']} observations ({metrics['nominal_samples']} saines, {metrics['attack_samples']} attaques)")
-    print(f" Contamination        : {metrics['contamination']*100:.2f}% (calibrée sans seuil en dur)")
-    print(f" Vitesse d'inférence  : {metrics['inference_latency_us_per_sample']} µs / requête (Temps réel strict)")
-    print("-" * 70)
-    print(" 🎯 PERFORMANCES DE DÉTECTION :")
-    print(f"   • Précision (Fiabilité détection) : {m['precision']*100:>6.2f}%")
-    print(f"   • Rappel (Taux d'attaques stoppées) : {m['recall']*100:>6.2f}%")
-    print(f"   • F1-Score (Moyenne harmonique)    : {m['f1_score']*100:>6.2f}%")
-    print(f"   • ROC-AUC (Discrimination globale)  : {m['roc_auc']:>6.4f}")
-    print(f"   • Taux de fausses alertes (FPR)     : {m['false_positive_rate']*100:>6.2f}%")
-    print("-" * 70)
-    print(" 🛡️ MATRICE DE CONFUSION CYBER SOC :")
-    print(f"   [ Saines classées Saines (TN) : {cm['true_negatives_nominal']:>4} ]  [ Fausses Alertes (FP) : {cm['false_positives_false_alarms']:>4} ]")
-    print(f"   [ Attaques Manquées (FN)     : {cm['false_negatives_missed_attacks']:>4} ]  [ Attaques Détectées (TP) : {cm['true_positives_detected_attacks']:>4} ]")
-    
-    if "vector_breakdown" in metrics and metrics["vector_breakdown"]:
-        print("-" * 70)
-        print(" 🔍 EFFICACITÉ PAR VECTEUR D'ATTAQUE :")
-        for atype, stats in metrics["vector_breakdown"].items():
-            print(f"   • {atype:<20} : {stats['correctly_classified']}/{stats['total']} ({stats['success_rate_pct']}%)")
-    print("=" * 70 + "\n")
+    return iso_forest, metrics
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Pipeline d'entraînement Isolation Forest")
-    parser.add_argument("--samples", type=int, default=1500, help="Nombre total d'échantillons à générer/calibrer")
-    parser.add_argument("--trees", type=int, default=150, help="Nombre d'arbres de partitionnement")
-    parser.add_argument("--save-csv", action="store_true", default=True, help="Sauvegarder le jeu de données mis à jour")
+    parser = argparse.ArgumentParser(description="Pipeline d'entraînement Isolation Forest calibré")
+    parser.add_argument("--samples", type=int, default=1500, help="Nombre total d'échantillons télémétriques")
+    parser.add_argument("--estimators", type=int, default=150, help="Nombre d'arbres d'isolation")
     args = parser.parse_args()
-
-    print("[*] Génération du jeu de données exhaustif multi-vecteurs...")
-    df = generate_extended_dataset(n_samples=args.samples, seed=42)
     
-    if args.save_csv:
-        export_df = df[["request_rate", "error_rate", "latency_ms", "label"]].copy()
-        export_df.insert(0, "timestamp", pd.date_range(end=pd.Timestamp.now(tz="UTC"), periods=len(df), freq="10s").strftime("%Y-%m-%dT%H:%M:%SZ"))
-        export_df.to_csv(DATASET_FILE, index=False)
-        print(f"[✔] Dataset exporté avec succès : {DATASET_FILE} ({len(export_df)} lignes)")
-
-    print("[*] Entraînement du modèle et validation croisée...")
-    model, metrics = train_and_evaluate_isolation_forest(df, n_estimators=args.trees)
-
-    # Sérialisation du modèle et du rapport
+    print("=" * 70)
+    print(" 🚀 RESILIENCE-ALPHA — APPRENTISSAGE SCIENTIFIQUE ISOLATION FOREST")
+    print(f" Calibration : Trafic Nominal Réel 0.5 req/s • Volume : {args.samples} obs.")
+    print("=" * 70)
+    
+    print("[1/4] Génération du jeu de données télémétrique opérationnel...")
+    df = generate_extended_dataset(n_samples=args.samples)
+    df.to_csv(DATASET_FILE, index=False)
+    print(f"      ✓ Dataset sauvegardé : {DATASET_FILE} ({len(df)} lignes)")
+    
+    print("[2/4] Entraînement de l'ensemble d'arbres d'isolation...")
+    model, metrics = train_and_evaluate_isolation_forest(df, n_estimators=args.estimators)
+    
+    print("[3/4] Sérialisation de l'artefact Joblib...")
     joblib.dump(model, MODEL_OUTPUT)
-    print(f"[✔] Modèle sérialisé : {MODEL_OUTPUT}")
-
+    print(f"      ✓ Modèle sérialisé : {MODEL_OUTPUT}")
+    
+    print("[4/4] Sauvegarde du rapport d'évaluation scientifique JSON...")
     with open(METRICS_OUTPUT, "w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=2, ensure_ascii=False)
-    print(f"[✔] Métriques de validation enregistrées : {METRICS_OUTPUT}")
-
-    print_scientific_report(metrics)
+    print(f"      ✓ Métriques enregistrées : {METRICS_OUTPUT}")
+    
+    print("\n" + "=" * 70)
+    print(" 📊 BILAN DES PERFORMANCES DU MODÈLE CALIBRÉ (0.5 req/s) :")
+    print(f" - ROC-AUC Score : {metrics['performance_metrics']['roc_auc']:.4f}")
+    print(f" - F1-Score      : {metrics['performance_metrics']['f1_score']:.4f}")
+    print(f" - Recall        : {metrics['performance_metrics']['recall']:.4f}")
+    print(f" - Precision     : {metrics['performance_metrics']['precision']:.4f}")
+    print(f" - Taux Faux Positif : {metrics['performance_metrics']['false_positive_rate'] * 100:.2f}%")
+    print(f" - Latence d'inférence : {metrics['benchmarks']['inference_latency_per_sample_us']} µs / observation")
+    print("=" * 70)
 
 
 if __name__ == "__main__":

@@ -191,6 +191,7 @@ RAG_SYSTEM_PROMPT = """Tu es l'assistant documentaire cyber de PROJECT RESILIENC
 RÈGLE ABSOLUE DE SÉCURITÉ : Ton rôle est STRICTEMENT ANALYTIQUE ET CONSULTATIF. Tu n'as STRICTEMENT AUCUN DROIT DE REMÉDIATION ni d'exécution de commande.
 Tu ne dois jamais exécuter, ordonner ou simuler d'action technique autonome sur l'infrastructure.
 Réponds exclusivement à partir des procédures fournies dans le contexte ci-dessous.
+Réponds de manière concise, percutante et claire (en 2 à 3 phrases maximum) pour permettre une synthèse vocale fluide à l'opérateur.
 Si une procédure de remédiation est demandée, détaille les consignes documentées pour l'opérateur humain tout en rappelant que tu n'exécutes aucune action directe.
 Si l'information demandée n'est pas présente dans le document, indique simplement que la documentation disponible ne contient pas cette information.
 
@@ -200,40 +201,77 @@ Extrait des procédures de sécurité :
 Question de l'opérateur :
 {question}
 
-Réponse consultative :"""
+Réponse consultative concise :"""
 
 qa_prompt = PromptTemplate(
     template=RAG_SYSTEM_PROMPT,
     input_variables=["context", "question"]
 )
 
-# Initialisation du LLM Ollama
+# Initialisation du LLM Ollama avec limitation stricte pour fluidité vocale (réponse < 5 secondes)
 llm = Ollama(
     base_url=OLLAMA_BASE_URL,
     model=OLLAMA_MODEL,
-    temperature=0.1
+    temperature=0.1,
+    num_predict=85,
+    stop=["\n\n\n", "Question de l'opérateur", "RÈGLE ABSOLUE", "Extrait des"],
+    timeout=40.0
 )
 
 vector_db = None
 qa_chain = None
 
 def init_vector_store():
-    """Charge procedures.pdf, calcule les embeddings CPU et instancie la base FAISS."""
+    """Charge procedures.pdf et les dossiers markdown de gouvernance, calcule les embeddings CPU et instancie la base FAISS."""
     global vector_db, qa_chain
+    documents = []
+
+    # 1. Chargement du PDF s'il existe
     if os.path.exists(PROCEDURES_FILE):
         try:
             logger.info(f"Chargement de la documentation : {PROCEDURES_FILE}...")
             loader = PyPDFLoader(PROCEDURES_FILE)
-            documents = loader.load()
+            documents.extend(loader.load())
+        except Exception as e:
+            logger.error(f"Erreur lors du chargement de {PROCEDURES_FILE}: {e}")
 
+    # 2. Chargement des documents Markdown de gouvernance (BIA, EBIOS RM, DORA, Architecture)
+    knowledge_dir = os.path.join(os.path.dirname(__file__), "knowledge")
+    if os.path.exists(knowledge_dir):
+        from langchain_core.documents import Document
+        for fname in sorted(os.listdir(knowledge_dir)):
+            if fname.endswith(".md"):
+                fpath = os.path.join(knowledge_dir, fname)
+                try:
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    documents.append(Document(page_content=content, metadata={"source": fname}))
+                    logger.info(f"Document gouvernance chargé pour RAG : {fname}")
+                except Exception as e:
+                    logger.error(f"Erreur lors de la lecture de {fname}: {e}")
+
+    if documents:
+        try:
             text_splitter = RecursiveCharacterTextSplitter(
                 chunk_size=500,
                 chunk_overlap=50
             )
             chunks = text_splitter.split_documents(documents)
-            logger.info(f"{len(chunks)} chunks extraits du PDF.")
+            logger.info(f"{len(chunks)} chunks extraits pour le RAG.")
 
-            embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+            # Mode 100% Hors-Ligne : Chargement local prioritaire sans requête Internet
+            local_model_path = os.path.join(os.path.dirname(__file__), "models", "all-MiniLM-L6-v2")
+            if os.path.exists(local_model_path):
+                logger.info(f"Chargement embeddings 100% HORS-LIGNE depuis : {local_model_path}")
+                embeddings = HuggingFaceEmbeddings(
+                    model_name=local_model_path,
+                    model_kwargs={"device": "cpu", "local_files_only": True},
+                    encode_kwargs={"normalize_embeddings": True}
+                )
+            else:
+                logger.info("Chargement standard all-MiniLM-L6-v2")
+                embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+
             vector_db = FAISS.from_documents(chunks, embeddings)
 
             qa_chain = RetrievalQA.from_chain_type(
@@ -242,11 +280,11 @@ def init_vector_store():
                 retriever=vector_db.as_retriever(search_kwargs={"k": 3}),
                 chain_type_kwargs={"prompt": qa_prompt}
             )
-            logger.info("Base vectorielle FAISS et chaîne RAG initialisées avec succès.")
+            logger.info("Base vectorielle FAISS et chaîne RAG initialisées avec succès avec la gouvernance.")
         except Exception as e:
-            logger.error(f"Erreur lors du chargement de FAISS / HuggingFace: {e}")
+            logger.error(f"Erreur lors de l'initialisation FAISS / HuggingFace: {e}")
     else:
-        logger.warning(f"Fichier {PROCEDURES_FILE} introuvable à la racine. Le RAG est en attente d'indexation.")
+        logger.warning("Aucun document trouvé pour le RAG.")
 
 init_vector_store()
 
@@ -254,10 +292,10 @@ init_vector_store()
 # SCHÉMAS PYDANTIC (ENTRÉES / SORTIES)
 # ==============================================================================
 class MetricPayload(BaseModel):
-    timestamp: str = Field(..., example="2026-10-20T10:00:00Z")
-    request_rate: float = Field(..., ge=0.0, description="Requêtes par seconde", example=52.5)
-    error_rate: float = Field(..., ge=0.0, le=1.0, description="Taux d'erreurs HTTP (0.0 à 1.0)", example=0.015)
-    latency_ms: float = Field(..., ge=0.0, description="Latence moyenne en ms", example=118.0)
+    timestamp: str = Field(..., example="2026-10-21T10:00:00Z")
+    request_rate: float = Field(..., ge=0.0, description="Requêtes par seconde (Nominal opérationnel: 0.50 req/s)", example=0.50)
+    error_rate: float = Field(..., ge=0.0, le=1.0, description="Taux d'erreurs HTTP (0.0 à 1.0)", example=0.005)
+    latency_ms: float = Field(..., ge=0.0, description="Latence moyenne en ms", example=28.0)
 
 class AnalysisResponse(BaseModel):
     timestamp: str

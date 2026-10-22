@@ -38,9 +38,11 @@ scrape_configs:
       - targets: ["promtail:9080"]
 
   - job_name: ml-detector
+    scrape_interval: 5s  # même rythme que les mesures du détecteur : la riposte se voit tout de suite
     static_configs:
       - targets: ["ml-detector:8010"]
 
   - job_name: remediation
+    scrape_interval: 5s  # même rythme que les mesures du détecteur : la riposte se voit tout de suite
     static_configs:
       - targets: ["remediation:8020"]

@@ -51,6 +51,40 @@ export interface HealthCheckResponse {
   };
 }
 
+export interface RemediationAction {
+  ts: number;
+  alert_id: string;
+  type: 'crash' | 'dos' | 'intrusion' | string;
+  service: string;
+  action: 'block_source' | 'restart_service' | 'restore_database' | string;
+  result: 'success' | 'failure' | string;
+  duration_s: number;
+}
+
+export interface GrafanaTimeSeriesPoint {
+  ts: number;
+  value: number;
+}
+
+export interface GrafanaContainerMetric {
+  healthy?: boolean;
+  cpu_pct?: number;
+  mem_mb?: number;
+}
+
+export interface GrafanaTelemetry {
+  online: boolean;
+  ml_anomaly: boolean;
+  ml_alerts_1h: number;
+  remediation_ok_1h: number;
+  remediation_ko_1h: number;
+  targets_up_ratio: number;
+  anomaly_score_series: GrafanaTimeSeriesPoint[];
+  features_series: Record<string, GrafanaTimeSeriesPoint[]>;
+  http_status_series: Record<string, GrafanaTimeSeriesPoint[]>;
+  containers: Record<string, GrafanaContainerMetric>;
+}
+
 export interface WafStatusResponse {
   banned_ips: string[];
   stats: {
@@ -59,6 +93,12 @@ export interface WafStatusResponse {
     fuzzing_drops: number;
     total_blocked: number;
   };
+  remediation?: {
+    status: string;
+    queue: number;
+    recent_actions: RemediationAction[];
+  };
+  grafana?: GrafanaTelemetry | null;
 }
 
 export interface HourlyVolumeCTE {
@@ -99,7 +139,6 @@ export interface ProjectSourceFile {
   badge?: string;
   content: string;
 }
-
 
 // ==============================================================================
 // Pilier IA & Data (Détection ML & Assistant RAG)

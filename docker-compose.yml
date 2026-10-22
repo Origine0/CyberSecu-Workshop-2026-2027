@@ -90,6 +90,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET manquant dans .env}
       # false : les paiements anonymes (traffic-gen, carte directe) restent acceptés
       REQUIRE_AUTH: ${REQUIRE_AUTH:-false}
+    volumes:
+      - ./backend/app:/app/app:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -122,6 +124,8 @@ services:
       POSTGRES_PORT: "5432"
       POSTGRES_DB: ${POSTGRES_DB:-resilience_db}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET manquant dans .env}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD manquant dans .env}
     depends_on:
       postgres:
         condition: service_healthy
@@ -167,9 +171,12 @@ services:
     cap_drop: [ALL]
     tmpfs:
       - /tmp
+    # recharge nginx quand la liste de blocage change, sans redémarrer le conteneur (infra/waf-reload)
+    entrypoint: ["/bin/sh", "-c", "sh /reload/reload-on-change.sh & exec /docker-entrypoint.sh nginx -g 'daemon off;'"]
     volumes:
       - ./infra/placeholders/waf:/etc/nginx/conf.d:ro
       - waf-blocklist:/etc/nginx/blocklist:ro
+      - ./infra/waf-reload:/reload:ro
     ports:
       # 8082 car 8080 (Oracle) et 8081 (Apache) sont déjà pris sur le PC hôte
       - "${PUBLISH_IP:-0.0.0.0}:${WAF_PORT:-8082}:8080"
@@ -291,6 +298,8 @@ services:
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_SECURITY_DISABLE_GRAVATAR: "true"
+      # autorise le rafraîchissement à la seconde (défaut Grafana : 5 s minimum) pour voir l'attaque en direct
+      GF_DASHBOARDS_MIN_REFRESH_INTERVAL: "1s"
       # pas d'internet pendant la démo
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"

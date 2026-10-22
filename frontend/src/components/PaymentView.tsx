@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
 import { 
   CreditCard, 
@@ -7,7 +7,8 @@ import {
   ArrowRight, 
   Lock, 
   Copy, 
-  Check 
+  Check,
+  UserRound
 } from 'lucide-react';
 import { PaymentRequest, Transaction } from '../types/index.ts';
 import { INITIAL_MERCHANTS, validatePaymentRequest } from '../utils/paymentEngine.ts';
@@ -33,14 +34,19 @@ export const PaymentView: React.FC<PaymentViewProps> = ({
   onRemotePayment,
   onGoToAccount,
 }) => {
-  const [amount, setAmount] = useState('49.90');
+  const [amount, setAmount] = useState('25.00');
   const [merchantId, setMerchantId] = useState(INITIAL_MERCHANTS[0].id);
-  const [customerName, setCustomerName] = useState('Antoine Martin');
+  const [customerName, setCustomerName] = useState(() => account?.holder_name || 'Titulaire');
   const [cardNumber, setCardNumber] = useState('4242 •••• •••• 4242');
   const [rawCardNumber, setRawCardNumber] = useState('4242424242424242');
   const [expDate, setExpDate] = useState('12/28');
   const [cvv, setCvv] = useState('883');
-  const [simulateFailure, setSimulateFailure] = useState(false);
+
+  useEffect(() => {
+    if (account?.holder_name) {
+      setCustomerName(account.holder_name);
+    }
+  }, [account?.holder_name]);
 
   const [loading, setLoading] = useState(false);
   const [lastTransaction, setLastTransaction] = useState<Transaction | null>(null);
@@ -49,10 +55,10 @@ export const PaymentView: React.FC<PaymentViewProps> = ({
   const [focusedField, setFocusedField] = useState<'number' | 'name' | 'exp' | 'cvv' | null>(null);
 
   const PRESETS = [
-    { label: '49,90 €', amount: '49.90' },
-    { label: '120,00 €', amount: '120.00' },
-    { label: '15,00 €', amount: '15.00' },
-    { label: '450,00 €', amount: '450.00' },
+    { label: '15 €', amount: '15.00' },
+    { label: '25 €', amount: '25.00' },
+    { label: '50 €', amount: '50.00' },
+    { label: '100 €', amount: '100.00' },
   ];
 
   const handleCardInput = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -66,6 +72,12 @@ export const PaymentView: React.FC<PaymentViewProps> = ({
     e.preventDefault();
     setFormError(null);
 
+    if (!account) {
+      setFormError('Connexion requise pour effectuer un paiement.');
+      onGoToAccount();
+      return;
+    }
+
     const payload: PaymentRequest = {
       amount: parseFloat(amount),
       currency: 'EUR',
@@ -75,7 +87,7 @@ export const PaymentView: React.FC<PaymentViewProps> = ({
       exp_date: expDate,
       cvv,
       reference: `CMD-${Math.floor(1000 + Math.random() * 9000)}`,
-      simulate_failure: simulateFailure || isDegraded,
+      simulate_failure: isDegraded,
     };
 
     const validation = validatePaymentRequest(payload);
@@ -116,6 +128,44 @@ export const PaymentView: React.FC<PaymentViewProps> = ({
     setTimeout(() => setCopiedId(false), 2000);
   };
 
+  if (!account) {
+    return (
+      <div className="max-w-xl mx-auto px-4 py-16">
+        <div className="bg-white p-8 sm:p-10 rounded-2xl border border-zinc-200/80 shadow-xs text-center space-y-6">
+          <div className="w-14 h-14 rounded-2xl bg-zinc-100 flex items-center justify-center mx-auto text-zinc-900 ring-8 ring-zinc-50">
+            <Lock className="w-7 h-7" />
+          </div>
+
+          <div className="space-y-2">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
+              Connexion requise
+            </span>
+            <h2 className="text-2xl font-semibold tracking-tight text-zinc-950">
+              Authentification obligatoire
+            </h2>
+            <p className="text-sm text-zinc-500 max-w-md mx-auto">
+              Pour initier un paiement et débiter votre compte, vous devez obligatoirement vous connecter ou créer un compte client.
+            </p>
+          </div>
+
+          <div className="pt-2 flex flex-col sm:flex-row gap-3 justify-center">
+            <button
+              onClick={onGoToAccount}
+              className="px-6 py-3 rounded-xl bg-zinc-950 hover:bg-zinc-800 text-white font-medium text-xs shadow-xs transition-colors cursor-pointer flex items-center justify-center gap-2"
+            >
+              <UserRound className="w-4 h-4" />
+              <span>Se connecter ou créer un compte</span>
+            </button>
+          </div>
+
+          <div className="pt-4 border-t border-zinc-100 text-[11px] text-zinc-400">
+            Environnement de démonstration • EPSI Bac+5 Cyber-Résilience
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-3xl mx-auto px-4 py-10">
       
@@ -124,19 +174,14 @@ export const PaymentView: React.FC<PaymentViewProps> = ({
         <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-zinc-950">
           Paiement
         </h1>
-        <p className="text-xs text-zinc-400 mt-1 font-normal">
-          {account
-            ? 'Paiement réel · POST /api/pay · débit du solde de votre compte'
-            : 'Paiement par carte · POST /api/pay · persistance PostgreSQL'}
-        </p>
-        {account ? (
-          <p className="text-xs text-zinc-600 mt-2">
-            Solde : <span className="font-semibold">{account.balance.toFixed(2)} €</span>
-          </p>
-        ) : (
-          <button onClick={onGoToAccount} className="text-xs text-zinc-900 font-medium underline underline-offset-4 mt-2">
-            Se connecter pour payer avec mon solde
-          </button>
+        {account && (
+          <div className="inline-flex items-center gap-2 mt-3 px-3.5 py-1.5 rounded-full bg-emerald-50 border border-emerald-200/80 text-xs text-emerald-900 shadow-xs">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="text-zinc-600">Solde disponible sur votre compte :</span>
+            <span className="font-semibold text-emerald-950 font-mono">
+              {account.balance.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+            </span>
+          </div>
         )}
 
         {/* Minimal Amount Presets */}
@@ -186,7 +231,9 @@ export const PaymentView: React.FC<PaymentViewProps> = ({
                 setCardNumber('4242 •••• •••• 4242');
                 setExpDate('12/28');
                 setCvv('789');
-                setCustomerName('Antoine Martin');
+                if (account?.holder_name) {
+                  setCustomerName(account.holder_name);
+                }
               }}
               className="text-xs text-zinc-400 hover:text-zinc-900 transition-colors underline underline-offset-4 cursor-pointer"
             >
@@ -312,19 +359,6 @@ export const PaymentView: React.FC<PaymentViewProps> = ({
                   className="w-full px-3 py-2 bg-zinc-50/80 border border-zinc-200 rounded-xl text-xs text-zinc-950 text-center focus:outline-none focus:bg-white focus:border-zinc-950 transition-all"
                 />
               </div>
-            </div>
-
-            {/* Chaos checkbox */}
-            <div className="pt-1">
-              <label className="flex items-center gap-2 cursor-pointer text-xs text-zinc-500 hover:text-zinc-800">
-                <input
-                  type="checkbox"
-                  checked={simulateFailure || isDegraded}
-                  onChange={(e) => setSimulateFailure(e.target.checked)}
-                  className="rounded border-zinc-300 text-zinc-900 focus:ring-0"
-                />
-                <span>Simuler un incident (Test de reprise)</span>
-              </label>
             </div>
 
             {/* Submit Button */}

@@ -9,11 +9,11 @@ Réseau du labo, ports exposés et réseaux Docker. À mettre à jour à chaque 
 | SSID | `RESILIENCE-G4` (point d'accès mobile Windows sur le PC Hôte) |
 | Sous-réseau | `192.168.137.0/24` |
 | Passerelle / DNS | `192.168.137.1` (PC Hôte, partage de connexion Windows) |
-| Accès Internet | Partage USB du téléphone de Mélanie → PC Hôte → hotspot. Pas d'Internet pendant la démo : images Docker et modèles Ollama téléchargés à l'avance |
+| Accès Internet | Partage USB du téléphone de Mélanie vers le PC Hôte (interface « Ethernet »), séparé de la carte Wi-Fi qui diffuse le hotspot. Pas d'Internet pendant la démo : images Docker et modèles Ollama téléchargés à l'avance |
 
 | Membre | Rôle | Machine | IP |
 |---|---|---|---|
-| Mélanie | Infra | PC Hôte (Windows + WSL2 + Docker Desktop) | `192.168.137.1` |
+| Mélanie | Infra | PC Hôte (Windows + WSL2 + Docker Desktop), crée le hotspot | `192.168.137.1` |
 | Clara | Cyber | PC Attaquant | `192.168.137.50` |
 | Agathe | IA | PC IA (Ollama) | `192.168.137.60` |
 | Antoine | Dev | Portable équipe | `192.168.137.101` |
@@ -68,9 +68,8 @@ curl -s -o /dev/null -w '%{http_code}\n' --connect-timeout 3 http://192.168.137.
 
 Seuls deux ports sont publiés sur le PC Hôte. Tout le reste est interne à Docker.
 
-Pourquoi 8082 et pas 8080 ? Sur le PC Hôte, le port 8080 est déjà pris par Oracle Database (`TNSLSNR`)
-et le 8081 par Apache (`httpd`). Le WAF écoute toujours sur 8080 à l'intérieur de Docker, mais il est publié
-sur 8082 côté Wi-Fi. Ce port se règle avec la variable `WAF_PORT` du `.env`.
+Le WAF écoute sur 8080 à l'intérieur de Docker et est publié sur 8082 côté Wi-Fi
+(réglable avec la variable `WAF_PORT` du `.env`).
 
 | Port hôte | Service | Rôle | Qui peut y accéder |
 |---|---|---|---|
@@ -110,7 +109,8 @@ Choix de l'équipe : on ne modifie pas le pare-feu Windows du PC Hôte.
   défini uniquement dans le `.env` local (non versionné), chiffré dans le dépôt avec SOPS + age (`secrets.enc.env`).
 - Le reste n'est pas exposé de toute façon : aucun autre service n'a de port publié.
 
-Règle ICMP créée pour autoriser le ping vers le PC Hôte (sans restriction d'adresse) :
+Règle ICMP créée sur le PC Hôte pour autoriser le ping (sans restriction d'adresse) ; sans elle le ping échoue,
+mais les tests de port restent la vraie preuve de connectivité :
 
 ```powershell
 New-NetFirewallRule -DisplayName "ICMP labo" -Protocol ICMPv4 -IcmpType 8 -Direction Inbound -Action Allow
@@ -130,12 +130,12 @@ test de port TCP (§ 1).
 | `payment-api` | 8000 | non | `waf`, `prometheus` (`/metrics`) |
 | `auth` | 8001 | non | `waf`, `payment-api` |
 | `postgres` (PostgreSQL 16) | 5432 | non | `payment-api` |
-| `prometheus` | 9090 | non | `grafana`, `ml-detector` |
+| `prometheus` | 9090 | non | `grafana` (datasource) |
 | `grafana` | 3000 | oui → hôte 3000 | Équipe sur le Wi-Fi |
 | `loki` | 3100 | non | `promtail` (push), `grafana`, `ml-detector` (lecture), `prometheus` (métriques) |
 | `promtail` | 9080 | non | `prometheus` (métriques propres) |
 | `cadvisor` | 8080 | non | `prometheus` |
-| `docker-stats-exporter` | 9105 | non | `prometheus` |
+| `docker-stats-exporter` | 9105 | non | `prometheus`, `ml-detector` (état des conteneurs) |
 | `ml-detector` | 8010 | non | `prometheus` (métriques) |
 | `remediation` | 8020 | non | `ml-detector` (déclenchement), `prometheus` (métriques) |
 | `socket-proxy-ro` | 2375 | non | `promtail`, `cadvisor`, `docker-stats-exporter` |

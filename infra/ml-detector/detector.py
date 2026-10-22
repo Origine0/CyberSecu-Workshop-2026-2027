@@ -2,8 +2,8 @@
 Isolation Forest (fichier entraîné dans backend-ia) et prévient le moteur de remédiation en cas d'anomalie.
 
 Mesures (fenêtre WINDOW_S, vues côté client, donc valables même quand l'API est arrêtée) :
-  request_rate : requêtes par seconde reçues par le waf
-  error_rate   : part de réponses en erreur (max entre le waf et le générateur de trafic)
+  request_rate : requêtes par seconde reçues par le waf pour l'API (/api/, /auth/), hors lectures du dashboard
+  error_rate   : part de ces réponses en erreur (max entre le waf et le générateur de trafic)
   latency_ms   : latence moyenne des paiements du générateur de trafic
 Le modèle décide s'il y a anomalie ; la cause (crash, dos, intrusion) sert seulement à choisir la réponse.
 """
@@ -35,7 +35,10 @@ TOKEN = os.environ.get("REMEDIATION_TOKEN", "")
 INTERVAL_S = float(os.environ.get("INTERVAL_S", "5"))
 WINDOW_S = int(os.environ.get("WINDOW_S", "30"))
 CONFIRMATIONS = int(os.environ.get("CONFIRMATIONS", "2"))  # anomalies consécutives avant d'alerter
-WARMUP_S = int(os.environ.get("WARMUP_S", "90"))  # pas d'alerte juste après un démarrage de la stack
+WARMUP_S = int(os.environ.get("WARMUP_S", "25"))  # pas d'alerte juste après un démarrage de la stack
+FORBIDDEN_MIN = int(os.environ.get("FORBIDDEN_MIN", "3"))  # refus 403 sans signature avant de parler d'intrusion
+FLOOD_RPS = float(os.environ.get("FLOOD_RPS", "3"))  # paiements par seconde d'un même client (un utilisateur en fait moins de 0,1)
+THROTTLED_MIN = int(os.environ.get("THROTTLED_MIN", "10"))  # refus 429/503/422 sur la fenêtre avant de parler de flood
 STARTED = time.time()
 PORT = int(os.environ.get("PORT", "8010"))
 HEARTBEAT = "/tmp/ml-detector.heartbeat"
@@ -43,6 +46,9 @@ HEARTBEAT = "/tmp/ml-detector.heartbeat"
 # services que la remédiation sait redémarrer (même liste blanche que ansible/group_vars/all.yml)
 WATCHED = ["payment-api", "waf", "auth", "frontend", "traffic-gen"]
 SCANNER_UA = re.compile(r"sqlmap|nikto|nmap|gobuster|dirb|dirbuster|wfuzz|hydra|masscan|zgrab|nuclei", re.I)
+# lectures automatiques du dashboard (environ 3 req/s par onglet ouvert) : le modèle a appris l'activité de
+# paiement (0,1 à 2 req/s), pas ces rafraîchissements. Le frontend et l'assistant IA (/ai/) ne comptent pas non plus.
+DASHBOARD_READS = re.compile(r"^/api/(health|transactions|waf/status)(\?|$)")
 ACCESS = re.compile(r'^(\S+) - \S+ \[[^\]]+\] "(\S+) (\S+)[^"]*" (\d{3}) \S+ "[^"]*" "([^"]*)"')
 
 state = {"features": {}, "score": 0.0, "anomaly": False, "streak": 0, "alerts": Counter(), "last": {}}
@@ -92,11 +98,12 @@ def measure():
             traffic.append(json.loads(line))
         except ValueError:
             pass
-    waf_errors = sum(1 for g in waf if int(g[3]) >= 400)
+    api = [g for g in waf if g[2].startswith(("/api/", "/auth/")) and not (g[1] == "GET" and DASHBOARD_READS.match(g[2]))]
+    waf_errors = sum(1 for g in api if int(g[3]) >= 400)
     tg_errors = sum(1 for t in traffic if t.get("tx_status") != "SUCCESS")
     features = {
-        "request_rate": round(len(waf) / WINDOW_S, 3),
-        "error_rate": round(max(waf_errors / len(waf) if waf else 0.0, tg_errors / len(traffic) if traffic else 0.0), 4),
+        "request_rate": round(len(api) / WINDOW_S, 3),
+        "error_rate": round(max(waf_errors / len(api) if api else 0.0, tg_errors / len(traffic) if traffic else 0.0), 4),
         "latency_ms": round(sum(t.get("latency_ms", 0) for t in traffic) / len(traffic), 1) if traffic else 0.0,
     }
     return features, waf
@@ -113,6 +120,12 @@ def container_states():
     return [s for s in WATCHED if values.get(s, {}).get("running", 0) < 1 or values.get(s, {}).get("healthy", 0) < 1]
 
 
+def top_agent(entries):
+    """Signature dominante (nom de l'outil sans sa version, ex. "python-requests") : le moteur décide s'il la bloque."""
+    agents = Counter(g[4].split("/")[0].strip() for g in entries if g[4] and g[4] != "-")
+    return agents.most_common(1)[0][0] if agents else ""
+
+
 def diagnose(waf):
     """Cause probable de l'anomalie, pour choisir la réponse. None = pas de cause sur laquelle agir
     (perturbation passagère, par exemple pendant un redéploiement) : on n'envoie pas d'alerte."""
@@ -122,19 +135,32 @@ def diagnose(waf):
     # les requêtes du réseau app (10.77.20.x) viennent de la plateforme elle-même : générateur de trafic et
     # vérifications de la remédiation. Les vrais clients arrivent par le réseau edge (10.77.10.x).
     waf = [g for g in waf if not g[0].startswith("10.77.20.")]
-    suspicious = [g for g in waf if SCANNER_UA.search(g[4]) or g[3] == "403"]
-    if suspicious:
+    # intrusion : un outil d'attaque reconnu, ou plusieurs refus du WAF (un 403 isolé, comme le test de
+    # /api/docs de make check, n'en est pas une)
+    signed = [g for g in waf if SCANNER_UA.search(g[4])]
+    forbidden = [g for g in waf if g[3] == "403"]
+    suspicious = signed + [g for g in forbidden if g not in signed]
+    if signed or len(forbidden) >= FORBIDDEN_MIN:
         # signature = nom de l'outil d'attaque trouvé dans le User-Agent (ex. "sqlmap")
         tools = Counter(SCANNER_UA.search(g[4]).group(0).lower() for g in suspicious if SCANNER_UA.search(g[4]))
         ip = Counter(g[0] for g in suspicious).most_common(1)[0][0]
+        # forbidden_user_agent : si cette signature est déjà bloquée, ces 403 sont la riposte elle-même
         return {"type": "intrusion", "service": "payment-api", "source_ip": ip,
-                "user_agent": tools.most_common(1)[0][0] if tools else ""}
-    # flood : la majorité des erreurs sont des refus de limitation de débit (429 par l'API, 503 par le WAF)
+                "user_agent": tools.most_common(1)[0][0] if tools else "", "forbidden_user_agent": top_agent(forbidden)}
+    # flood : un même client envoie bien plus de paiements qu'un utilisateur, même si l'API ne les refuse pas encore
+    payments = Counter(g[0] for g in waf if g[1] == "POST" and g[2].startswith("/api/pay"))
+    if payments and payments.most_common(1)[0][1] >= FLOOD_RPS * WINDOW_S:
+        ip = payments.most_common(1)[0][0]
+        return {"type": "dos", "service": "payment-api", "source_ip": ip,
+                "user_agent": top_agent([g for g in waf if g[0] == ip and g[1] == "POST" and g[2].startswith("/api/pay")])}
+    # ou la majorité des erreurs sont des refus de limitation de débit (429 par l'API, 503 par le WAF) ou de
+    # validation (422, fuzzing), en nombre suffisant : une saisie invalide isolée n'est pas un flood
     errors = [g for g in waf if int(g[3]) >= 400]
-    throttled = [g for g in errors if g[3] in ("429", "503")]
-    if errors and len(throttled) * 2 >= len(errors):
-        top_ip = Counter(g[0] for g in throttled).most_common(1)
-        return {"type": "dos", "service": "payment-api", "source_ip": top_ip[0][0]}
+    throttled = [g for g in errors if g[3] in ("429", "503", "422")]
+    if len(throttled) >= THROTTLED_MIN and len(throttled) * 2 >= len(errors):
+        top_ip = Counter(g[0] for g in throttled).most_common(1)[0][0]
+        return {"type": "dos", "service": "payment-api", "source_ip": top_ip,
+                "user_agent": top_agent([g for g in throttled if g[0] == top_ip])}
     return None
 
 

@@ -1,11 +1,13 @@
 # PROJECT RESILIENCE-ALPHA — Workshop National Bac+5 (EPSI)
 
-## Domaine Développement : Service de Paiement Résilient & Dashboard
+## Plateforme Financière Cyber-Résiliente & Auto-Remédiée (Zero-Touch)
 
-Ce projet constitue le socle applicatif du démonstrateur de cyber-résilience **PROJECT RESILIENCE-ALPHA**. Il intègre :
-1. **Un conteneur PostgreSQL 16** avec schéma relationnel robuste et requêtes analytiques en **Common Table Expressions (CTE)** (sans vues lourdes pénalisantes).
-2. **Un backend FastAPI** conteneurisé avec les routes `/pay` (insertion transactionnelle idempotente) et `/health` (monitoring actif de l'API et de la base).
-3. **Un frontend Next.js 16 (React + Tailwind CSS)** avec maquette de supervision à **4 zones** (Observabilité Infra, Flux Métier, Cyber SOC / IA, Remédiation Zero-Touch).
+Ce dépôt constitue le démonstrateur complet **PROJECT RESILIENCE-ALPHA** (Groupe G4). Il intègre 17 services conteneurisés articulés autour des 5 domaines d'expertise du Workshop :
+1. **Développement & Persistance (`postgres`, `payment-api`, `auth`)** : PostgreSQL 16 avec schéma ACID, requêtes analytiques en **Common Table Expressions (CTE)** (sans vues matérialisées bloquantes), API transactionnelle FastAPI idempotente (`/pay`, `/health`, `/analytics/*`) et service d'authentification JWT (`HS256`).
+2. **Infrastructure, Chaos & Auto-Remédiation (`remediation`, `waf`, `prometheus`, `grafana`, `loki`)** : Architecture multi-réseaux cloisonnée (`dmz`, `app`, `data`, `mgmt`), supervision temps réel et démon Ansible exécutant automatiquement les playbooks de reprise via socket-proxy restreint.
+3. **Cybersécurité & Red/Blue Team (`waf`, `scripts/red_attack.py`, SOPS + `age`)** : Filtrage L7, limitation de débit, liste de blocage dynamique, chiffrement des secrets `.env.enc` et contrôles d'audit automatisés (`make security-check`, `make secret-scan`).
+4. **IA & AIOps (`ml-detector`, `ai-api`, `ollama`)** : Détection d'anomalies non supervisée (**Isolation Forest**) déclenchant automatiquement la remédiation Ansible, couplée à un assistant Cyber-SOC **RAG local** (FAISS + `all-MiniLM-L6-v2` + Ollama `qwen2.5:0.5b`) indexant le corpus de procédures et les dossiers EBIOS RM / PCA-PRA / DORA.
+5. **Frontend & Supervision 4 Zones (`frontend`)** : Portail React 19 + TypeScript + Vite + Tailwind CSS v4 servi derrière le WAF (`http://localhost:8082`), offrant la vue unifiée des 4 zones, le Pipeline Graphique de Résilience, le mode **Clip Chrono 60s** et le Cockpit d'investigation CTE/AIOps.
 
 ---
 
@@ -13,44 +15,53 @@ Ce projet constitue le socle applicatif du démonstrateur de cyber-résilience *
 
 ```text
 WORKSHOP_2026_2027/
-├── docker-compose.yml              # Stack complète (application, WAF, supervision, remédiation)
-├── .env.example                    # Variables d'environnement
-├── Makefile                        # Commandes courantes (make help)
+├── docker-compose.yml              # Stack complète (17 services, 4 réseaux isolés)
+├── .env.example                    # Modèle des variables d'environnement
+├── secrets.enc.env                 # Secrets chiffrés avec SOPS + age
+├── Makefile                        # Commandes d'exploitation, chaos, tests et audit
 ├── README.md
 │
-├── docs/plan-adressage.md          # IP du labo, ports, réseaux Docker, flux autorisés
-├── infra/                          # Configs Prometheus / Grafana / Loki / promtail, générateur de trafic, exporteur
-├── ansible/                        # Playbooks de remédiation : redémarrage, blocage WAF, contrôle de la base
-├── scripts/                        # chaos.sh et security-check.sh (make chaos, make security-check)
+├── docs/
+│   ├── architecture.md             # Dossier d'architecture & choix techniques
+│   ├── plan-adressage.md           # Plan d'adressage IP, ports, réseaux Docker & flux
+│   ├── cybersécurité/ebios-rm.md   # Analyse EBIOS RM, Red/Blue Team & durcissement
+│   └── gouvernance/gouvernance.md  # BIA financier, PCA/PRA, RACI & conformité NIS2/DORA
+│
+├── infra/                          # Services d'infrastructure & moteurs autonomes
+│   ├── auth/                       # Service FastAPI d'authentification JWT (/auth/login, /auth/verify)
+│   ├── ml-detector/                # Boucle AIOps Isolation Forest -> déclenchement auto Ansible
+│   ├── remediation/                # Serveur HTTP (port 8020) d'exécution des playbooks Ansible
+│   ├── waf/                        # Reverse-proxy Nginx L7 & filtrage des routes sensibles
+│   ├── prometheus/                 # Collecte des métriques applicatives et système
+│   ├── grafana/                    # Dashboards provisionnés (RESILIENCE-ALPHA)
+│   ├── loki/ & promtail/           # Centralisation des journaux conteneurs
+│   └── traffic-gen/                # Générateur continu de trafic marchand légitime
+│
+├── ansible/                        # Playbooks Zero-Touch : restart_service, block_source, restore_database
+├── scripts/                        # red_attack.py, normal_traffic.py, chaos.sh, security-check.sh, secret-scan.sh
 │
 ├── database/
-│   ├── init.sql                    # Initialisation schéma, tables (merchants, accounts, transactions, audit), index et seeds
-│   └── queries_analytics.sql       # Analyses via CTEs (Taux d'échec glissant, Profiling marchand, Preuve mathématique de reprise)
+│   ├── init.sql                    # Schéma relationnel (merchants, accounts, transactions, service_audit_logs)
+│   └── queries_analytics.sql       # Requêtes analytiques CTE (Santé glissante, Profiling marchand, Preuve de reprise)
 │
 ├── backend/
-│   ├── Dockerfile                  # Image durcie (non-root, healthcheck intégré)
-│   ├── requirements.txt            # FastAPI, SQLAlchemy 2, asyncpg, Prometheus
-│   └── app/
-│       ├── main.py                 # Points d'entrée FastAPI (/pay, /health, /transactions, /metrics)
-│       ├── config.py               # Paramètres applicatifs & injection de défaillances
-│       ├── database.py             # Session async SQLAlchemy & pool de connexions
-│       ├── models.py               # Modèles de données PostgreSQL
-│       ├── schemas.py              # Schémas Pydantic (validation entrées/sorties)
-│       └── services.py             # Logique métier, idempotence & simulation bancaire
+│   ├── Dockerfile                  # Image durcie non-root
+│   └── app/                        # API FastAPI (/pay, /health, /transactions, /analytics/*, /waf/*)
 │
-├── backend-ia/                     # Pilier IA & Cyber-SOC (Détection ML & RAG)
-│   ├── Dockerfile                  # Image CPU optimisée (torch CPU, FAISS libgomp)
-│   ├── requirements.txt            # FastAPI, Scikit-Learn, LangChain, FAISS-cpu
-│   ├── api.py                      # Détection d\'anomalies (Isolation Forest) & RAG (Ollama)
-│   ├── procedures.pdf              # Corpus documentaire de sécurité indexé
-│   └── README.md
+├── backend-ia/                     # Pilier IA & Cyber-SOC (API /analyze Isolation Forest & /ask RAG FAISS)
+│   ├── Dockerfile                  # Image CPU optimisée (PyTorch CPU, HuggingFace, FAISS)
+│   ├── api.py                      # Moteur d'inférence ML + indexation RAG (procedures.pdf + docs/**/*.md)
+│   └── procedures.pdf              # Corpus de procédures d'urgence Cyber-SOC
 │
-└── frontend/                       # Application Next.js (App Router + Tailwind CSS)
-    ├── app/
-    │   ├── layout.tsx              # Thème sombre & typographie Geist
-    │   ├── globals.css             # Directives Tailwind v4
-    │   └── page.tsx                # Dashboard de supervision interactif à 4 zones
-    └── package.json
+└── frontend/                       # Portail React 19 + TypeScript + Vite + Tailwind CSS v4
+    ├── Dockerfile                  # Build multi-stage + serveur Nginx non-root (port 8080 interne)
+    └── src/
+        ├── App.tsx                 # Orchestration temps réel, polling et bannière d'état
+        └── components/
+            ├── Dashboard4Zones.tsx         # Vue principale à 4 zones + Chrono 60s
+            ├── LiveResiliencePipeline.tsx  # Topologie interactive en 5 nœuds & onde Heartbeat
+            ├── AiCyberSocPanel.tsx         # Console interactive Isolation Forest (/analyze) & RAG (/ask)
+            └── AnalyticsCtePanel.tsx       # Visualisation en direct des 3 requêtes analytiques SQL CTE
 ```
 
 ---
@@ -63,13 +74,13 @@ Les secrets de configuration du projet sont chiffrés avec SOPS et la clé `age`
 
 ```bash
 # Déchiffrement direct :
-sops -d .env.enc > .env
+sops -d secrets.enc.env > .env
 
 # Ou via le script d'automatisation :
 ./scripts/decrypt_secrets.sh
 ```
 
-### 2. Lancement de l'Infrastructure Conteneurisée (PostgreSQL & FastAPI)
+### 2. Lancement de la Stack Conteneurisée
 
 Depuis la racine du projet :
 ```bash
@@ -81,27 +92,24 @@ Vérifier l'état des conteneurs :
 docker compose ps
 ```
 
-### 2. Test des Endpoints FastAPI
+### 3. Accès aux Interfaces
 
-L'API n'est plus exposée directement : tout passe par le WAF sur le port 8082.
+Seuls le WAF (`8082`) et Grafana (`3000`) sont exposés sur l'hôte :
+
+| Interface | URL | Détails |
+|---|---|---|
+| **Dashboard Principal (via WAF)** | `http://localhost:8082` (ou `http://192.168.137.1:8082`) | Portail React 4 Zones, Pipeline, Cockpit IA/CTE & Auth JWT |
+| **API de Paiement (via WAF)** | `http://localhost:8082/api/health` et `/api/pay` | Routes publiques filtrées par le WAF |
+| **API IA & RAG (via WAF)** | `http://localhost:8082/ai/analyze` et `/ai/ask` | Détection Isolation Forest & Assistant RAG |
+| **Grafana** | `http://localhost:3000` | Compte `admin`, mot de passe défini dans `.env` |
+
+### 4. Test Rapide des Endpoints API
 
 - **Healthcheck actif :**
   ```bash
   curl http://localhost:8082/api/health
   ```
-  *Réponse attendue (HTTP 200) :*
-  ```json
-  {
-    "status": "UP",
-    "service": "payment-api",
-    "database": "healthy",
-    "version": "1.0.0",
-    "uptime_seconds": 12.4,
-    "timestamp": "2026-10-19T10:00:00.000Z"
-  }
-  ```
-
-- **Paiement transactionnel `/pay` :**
+- **Paiement transactionnel `/api/pay` :**
   ```bash
   curl -X POST http://localhost:8082/api/pay \
     -H "Content-Type: application/json" \
@@ -112,92 +120,29 @@ L'API n'est plus exposée directement : tout passe par le WAF sur le port 8082.
       "idempotency_key": "IDEMP-DEMO-001"
     }'
   ```
-
-- **Documentation Swagger :** volontairement bloquée par le WAF (403). Pour la consulter en local :
-  ```bash
-  docker compose exec payment-api curl -s http://localhost:8000/openapi.json
-  ```
-
-- **Métriques Prometheus :** collectées en interne par Prometheus, visibles dans Grafana (`http://localhost:3000`).
+- **Documentation Swagger & Routes d'administration :** volontairement bloquées par le WAF (`HTTP 403` sur `/api/docs`, `/api/metrics`, `/api/waf/block`).
 
 ---
 
-## 🏗️ Infrastructure (docker compose, supervision, Ansible)
+## 🛡️ Boucle d'Auto-Remédiation (Zero-Touch) & Scénario Chrono 60s
 
-Toute la plateforme tourne sur le PC Hôte (Windows + WSL2 + Docker Desktop). Détail des IP, ports, réseaux et flux :
-[`docs/plan-adressage.md`](docs/plan-adressage.md).
+La boucle autonome fonctionne sans aucune intervention humaine :
+1. **Attaque / Perturbation** : Depuis le PC Attaquant (ou localement), lancement du scénario de démonstration :
+   ```bash
+   python3 scripts/red_attack.py --url http://localhost:8082/api/pay --mode chrono
+   ```
+2. **Détection ML (`ml-detector`)** : Le service collecte toutes les 5 secondes les métriques de `payment-api` et du `waf`. Dès que le modèle **Isolation Forest** (ou les seuils de sécurité 422/429/5xx) détecte deux fenêtres anormales consécutives, il qualifie l'incident (`dos`, `intrusion` ou `restart`).
+3. **Exécution Ansible (`remediation`)** : `ml-detector` appelle `POST http://remediation:8020/trigger`. Le conteneur `remediation` exécute immédiatement les playbooks Ansible (`block_source.yml`, `restart_service.yml`, `restore_database.yml`) via `socket-proxy-remed`.
+4. **Preuve de Reprise** : Le playbook et le script vérifient `/api/health` puis valident une transaction de preuve (`77.77 €`), visible en direct dans la **Zone 2**, la **Zone 4** et l'onglet **Preuve de Reprise (CTE #3)** du Dashboard.
 
-### Prérequis
-- Docker Desktop (sous Windows : avec l'intégration WSL activée, et les commandes lancées depuis Ubuntu)
-- `make`, `curl`, `nc` et `python3` sur la machine (Ubuntu : `sudo apt install -y make curl netcat-openbsd python3`).
-  Ansible n'est pas nécessaire sur la machine : il tourne dans le conteneur `remediation`.
-- Environ 3 Go de RAM libres pour Docker.
-
-Vérifier le groupe de la socket Docker, à reporter dans `DOCKER_SOCKET_GID` du `.env` s'il est différent de 1001 :
+### Commandes Makefile utiles
 ```bash
-docker run --rm -v /var/run/docker.sock:/s python:3.12.11-alpine3.22 stat -c %g /s
-```
-Symptôme d'une mauvaise valeur : `socket-proxy-remed` redémarre en boucle avec `permission denied` dans ses logs,
-et la remédiation ne peut plus rien redémarrer.
-
-### Déployer
-```bash
-make env     # crée .env depuis .env.example si besoin (définir GRAFANA_ADMIN_PASSWORD et REMEDIATION_DB_PASSWORD)
-make pull    # télécharge les images, à faire avant la démo (pas d'Internet sur place)
-make up      # démarre toute la stack
-```
-
-### Après un `git pull`
-```bash
-make reload  # recrée les conteneurs pour qu'ils voient les fichiers et dossiers mis à jour
-```
-Sans cela, un conteneur dont un dossier monté a été remplacé par Git tourne encore, mais ne peut plus redémarrer
-(y compris par la remédiation automatique).
-
-### Vérifier
-```bash
-make ps      # état des services (tous doivent être healthy)
-make check   # config, santé, API via le WAF, /api/docs bloqué, ports internes fermés, syntaxe Ansible
-make security-check   # exposition réseau, isolation entre conteneurs, droits des proxys Docker et du compte Postgres
-```
-
-| Accès | URL |
-|---|---|
-| Plateforme (WAF) | `http://192.168.137.1:8082` (ou `http://localhost:8082` sur le PC Hôte) |
-| Grafana | `http://192.168.137.1:3000`, compte `admin`, mot de passe dans `.env` |
-
-Le tableau de bord « Resilience-Alpha - Infra » est chargé automatiquement dans Grafana (dossier RESILIENCE-ALPHA).
-
-Seuls le WAF (8082) et Grafana (3000) sont publiés. Postgres, l'API, Prometheus, Loki et la remédiation ne sont
-joignables qu'à l'intérieur des réseaux Docker.
-
-### Relancer un service
-```bash
-make restart SERVICE=payment-api
-```
-Le playbook Ansible vérifie que le service est dans la liste blanche (`ansible/group_vars/all.yml`), le redémarre, attend
-qu'il soit healthy, puis envoie un paiement de test qui doit revenir en `SUCCESS`. `postgres`, les socket-proxy, la
-remédiation et la supervision sont exclus de la liste.
-
-### Remédiation et chaos
-Les playbooks de remédiation tournent dans le conteneur `remediation`, avec les mêmes droits que le futur moteur
-(accès Docker limité à lister et redémarrer, compte Postgres en lecture seule) :
-```bash
-make block TYPE=user_agent VALUE=sqlmap     # confinement dans le WAF (TYPE : ip, user_agent, ratelimit)
-make unblock TYPE=user_agent VALUE=sqlmap   # retire la règle
-make block-test                             # vérifie que le WAF applique la liste de blocage
-make restore                                # contrôle d'intégrité de la base, redémarrage de l'API, preuve de reprise
-make chaos SERVICE=payment-api PANNE=20     # panne simulée puis réparation, avec mesure du temps de reprise
-```
-
-### Services provisoires
-`auth`, `frontend`, `ml-detector`, `remediation` et `waf` tournent pour l'instant avec des conteneurs temporaires
-(`infra/placeholders/`) qui seront remplacés par les vrais services, sous le même nom et sur le même port.
-Le conteneur `remediation` utilise déjà l'image `resilience/ansible-runner` (`infra/ansible-runner/`), base du futur moteur.
-
-### Arrêter
-```bash
-make down    # arrête la stack, les volumes (base, métriques, logs) sont conservés
+make ps               # État des 17 services
+make check            # Santé globale, filtrage WAF, isolation des ports internes et syntaxe Ansible
+make security-check   # Audit complet d'exposition réseau, des droits Docker socket-proxy et Postgres
+make secret-scan      # Vérification d'absence de secrets en clair dans le dépôt Git
+make demo-ready       # Avant une démo ou une répétition : blocages retirés, moteur remis à zéro, contrôles (~2 min)
+make chaos SERVICE=payment-api PANNE=20   # Panne simulée puis réparation automatique chronométrée
 ```
 
 ---
@@ -206,31 +151,20 @@ make down    # arrête la stack, les volumes (base, métriques, logs) sont conse
 
 > **Choix d'ingénierie :** Nous avons délibérément exclu les vues matérialisées ou vues complexes lourdes. Lors d'un pic de charge ou d'une attaque par déni de service, le rafraîchissement d'une vue matérialisée pose des verrous (`locks`) et sature le cache RAM. Les Common Table Expressions (CTE) permettent d'extraire les métriques à la demande pour l'AIOps sans compromettre la latence transactionnelle.
 
-Les 3 requêtes CTE prévues :
-1. **WindowStats & HealthEvaluation** : Calcule le taux d'erreur et la latence moyenne sur une fenêtre glissante de 30 minutes pour alimenter la détection d'anomalies ML.
-2. **MerchantRecentActivity** : Détecte les attaques applicatives ciblées par marchand (taux de blocage WAF / rejets anormaux).
-3. **Preuve Mathématique de Reprise** : Compare les performances sur 3 fenêtres temporelles (`PRE_INCIDENT`, `INCIDENT_WINDOW`, `POST_REMEDIATION`) pour prouver au jury le retour au fonctionnement nominal sans intervention humaine (Axe 1 de la grille d'évaluation).
+Les 3 requêtes CTE sont exposées par le backend et visualisables en direct dans le Dashboard :
+1. **WindowStats & HealthEvaluation (`/api/analytics/window-health`)** : Calcule le taux d'erreur et la latence moyenne sur une fenêtre glissante de 30 minutes pour alimenter la détection d'anomalies ML.
+2. **MerchantRecentActivity (`/api/analytics/merchant-activity`)** : Détecte les attaques applicatives ciblées par marchand (taux de blocage WAF / rejets anormaux).
+3. **Preuve Mathématique de Reprise (`/api/analytics/recovery-proof`)** : Compare les performances sur 3 fenêtres temporelles (`1_PRE_INCIDENT`, `2_INCIDENT_WINDOW`, `3_POST_REMEDIATION`) pour prouver au jury le retour au fonctionnement nominal sans intervention humaine.
 
 ---
 
-## 💻 Lancement du Dashboard Frontend (Next.js)
+## 💻 Développement Local du Frontend (React 19 + Vite)
 
-Dans un terminal dédié :
+Le frontend est automatiquement construit et servi par le conteneur `frontend` derrière le WAF sur `http://localhost:8082`. Pour le lancer en mode développement local avec rechargement à chaud :
+
 ```bash
 cd frontend
-npm run dev -- -p 3001
+npm install
+npm run dev
 ```
-Accéder au tableau de bord sur [http://localhost:3001](http://localhost:3001) (le port 3000 est pris par Grafana).
-Dans le champ « URL de l'API » du dashboard, indiquer `http://localhost:8082/api`.
-
-### Les 4 Zones du Dashboard :
-* **Zone 1 (Haut-Gauche) : Santé de l'Infrastructure & Microservices**
-  * Statut en temps réel de FastAPI, PostgreSQL 16, WAF et Loki. Bouton d'interrogation active de `/health`.
-* **Zone 2 (Haut-Droite) : Flux Métier & Transactions en Direct**
-  * Formulaire d'injection de transaction `/pay` en direct (montant, mode nominal ou défaillance forcée).
-  * Fil d'eau des transactions en temps réel avec références uniques, montants et temps de réponse (ms).
-* **Zone 3 (Bas-Gauche) : Détection d'Anomalies IA & Cyber SOC**
-  * Visualisation de l'état du modèle de détection ML AIOps (Isolation Forest), score d'anomalie, et statut de l'assistant local RAG (Ollama).
-* **Zone 4 (Bas-Droite) : Moteur de Remédiation Autonome (Zero-Touch Recovery)**
-  * Cycle en 4 étapes de reprise automatique (Détection → Arbitrage Ansible → Remédiation conteneur → Vérification par nouvelle transaction `/pay`).
-  * Indicateur dédié au format **Clip Chrono 60 secondes**.
+L'interface de développement démarre sur `http://localhost:3001` (avec proxy Vite configuré vers `:8082`).
