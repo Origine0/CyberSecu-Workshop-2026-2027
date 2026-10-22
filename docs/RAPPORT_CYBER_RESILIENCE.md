@@ -53,21 +53,28 @@ Le règlement européen **DORA** impose aux entités financières des exigences 
 ### 2.1 Métriques de Continuité d'Activité (PCA / PRA)
 
 ```text
-  [ Incident / Crash ] 
+  [ Incident / Crash de Processus ] 
          │ 
-         ▼ < 1.8s (RTO mesuré)
-  [ Auto-Guérison Docker daemon ] ──> Healthcheck Nominal (HTTP 200)
+         ▼ < 1.8s (Redémarrage Docker daemon)
+  [ Auto-Relance par Docker ] ────────> Healthcheck Nominal (HTTP 200)
+
+  [ Incident Complexe / Attaque DoS ]
+         │
+         ▼ < 25s (RTO mesuré AIOps)
+  [ Remédiation IA + Ansible ] ───────> Confinement WAF & Reprise validée (HTTP 201)
          │
          ▼ RPO = 0
-  [ Reprise sans perte ] ───────────> Vérification Idempotence UUID & WAL Postgres
+  [ Reprise sans perte ] ─────────────> Intégrité WAL Postgres & Idempotence UUID (si fournie)
 ```
 
 * **RTO (Recovery Time Objective) — Temps de Reprise Mesuré :**
-  - **Auto-guérison sur crash conteneur :** **< 1.8 seconde**. Testé par arrêt brutal (`kill -9 1`), Docker daemon redémarre le conteneur (`restart: unless-stopped`) et rétablit le pool de connexions SQL immédiatement.
-  - **Mitigation automatique WAF :** **< 2.5 millisecondes** pour intercepter et bloquer un assaillant (passage immédiat en HTTP 429 ou 403 sans toucher la base de données).
+  - **Relance système sur crash de processus :** **< 1.8 seconde**. Testé par arrêt brutal (`kill -9 1`), c'est le **démon Docker** (`restart: unless-stopped`) qui relance le conteneur et rétablit le pool de connexions SQL immédiatement.
+  - **Remédiation autonome de bout en bout (AIOps) :** **< 25 secondes** pour la boucle complète : détection de l'anomalie par l'Isolation Forest sur 2 fenêtres glissantes, déclenchement du playbook Ansible et vérification de reprise transactionnelle (largement conforme au RTO cible de 2 minutes du BIA).
+  - **Mitigation immédiate WAF :** **< 2.5 millisecondes** pour intercepter un flux au-delà du seuil de débit applicatif (passage immédiat en HTTP 429).
 * **RPO (Recovery Point Objective) — Perte de Données Maximale Admissible :**
   - **RPO = 0 seconde (Zéro perte transactionnelle)**.
-  - Garanti par le moteur transactionnel PostgreSQL (transactions atomiques ACID, disques WAL synchronisés) et par l'**idempotence applicative obligatoire** (`idempotency_key` unique UUID stockée dans la table `transactions`). Tout rejeu est neutralisé sans débit en doublon.
+  - Garanti par le moteur transactionnel PostgreSQL (transactions atomiques ACID, disques WAL synchronisés) et par le mécanisme d'**idempotence applicative** (`idempotency_key` unique UUID stockée dans la table `transactions`). Tout rejeu avec la même clé est neutralisé sans débit en doublon.
+  - *Note de gouvernance / Constat technique :* Dans le prototype actuel, la clé d'idempotence est **facultative** (`nullable=True`) ; les requêtes sans clé sont traitées sans dédoublonnage. Sa généralisation obligatoire constitue un point d'amélioration identifié pour le passage en production.
 
 ### 2.2 Gestion des Incidents Majeurs TIC (Article 19 DORA)
 1. **Détection autonome :** Le modèle Machine Learning (Isolation Forest) corrèle les métriques de trafic en temps réel.
@@ -152,7 +159,7 @@ Le dispositif de filtrage de **PROJECT RESILIENCE-ALPHA** repose sur une défens
 * Fichier de configuration durci : [infra/placeholders/waf/default.conf](file:///Users/clarahonore/Documents/Etude/EPSI/M2/workshop/CyberSecu-Workshop-2026-2027/infra/placeholders/waf/default.conf).
 * **Isolation :** Seul conteneur exposé sur le port d'entrée avec Grafana.
 * **Intégration Ansible Zero-Touch :** Nginx charge dynamiquement les règles déposées par le conteneur de remédiation via `include /etc/nginx/blocklist/*.conf;`.
-* **Validation du test de blocage :** La commande `make block-test` vérifie qu'un User-Agent hostile (`test-blocage`) est instantanément rejeté en **HTTP 403** puis restauré en **HTTP 200** sans interruption de service.
+* **Validation du test de blocage :** La commande `make block-test` vérifie qu'un User-Agent hostile (`test-blocage`) est rejeté en **HTTP 403** puis restauré en **HTTP 200** (l'injection de la règle dans le volume partagé entraîne un rechargement/redémarrage du conteneur WAF d'environ 3 secondes pour charger la nouvelle liste de blocage).
 
 ### 4.2 WAF Applicatif FastAPI
 * Module dédié : [backend/app/waf.py](file:///Users/clarahonore/Documents/Etude/EPSI/M2/workshop/CyberSecu-Workshop-2026-2027/backend/app/waf.py).
@@ -218,12 +225,12 @@ python3 scripts/red_attack.py --mode chrono
 > *1. Un WAF Nginx en coupure réseau qui interdit strictement tout endpoint technique comme la documentation Swagger ou les métriques brutes.*  
 > *2. Un Rate Limiter par fenêtre glissante qui bloque instantanément les attaques par déni de service applicatif L7 en HTTP 429.*  
 > *3. Une boucle de remédiation dynamique : quand l'IA ou Ansible identifie un attaquant, une règle de bannissement est injectée à chaud dans le WAF, renvoyant immédiatement un HTTP 403 Forbidden sans toucher à la base de données.*  
-> *Regardons le test en direct : `make block-test` valide que le blocage s'applique en quelques millisecondes sans aucun redémarrage destructeur."*
+> *Regardons le test en direct : `make block-test` valide que le blocage s'applique en quelques secondes dans le WAF (en provoquant un rechargement/redémarrage du conteneur WAF de 3 secondes pour charger la nouvelle liste).*  
 
 #### [1:45 - 2:30] — Continuité d'Activité & Conformité Réglementaire DORA
 > *"Sur le plan réglementaire, notre architecture est pleinement alignée sur la directive européenne DORA :*  
-> *Notre RPO est de 0 seconde : grâce aux transactions ACID et à l'idempotence UUID obligatoire, aucune transaction n'est perdue ni débitée deux fois.*  
-> *Notre RTO mesuré est de moins de 1.8 seconde : même en cas de crash brutal du processus par injection de chaos, le conteneur s'auto-guérit et le service redevient nominal en moins de deux secondes, preuve mathématique à l'appui via nos requêtes analytiques CTE."*
+> *Notre RPO est de 0 seconde : grâce aux transactions ACID et au support de l'idempotence UUID (quand elle est fournie par le client), aucune transaction n'est perdue ni débitée deux fois.*  
+> *Notre RTO cible est de 2 minutes : en cas de crash brutal d'un processus, le démon Docker relance le conteneur en 1.8 s. Et sur incident complexe nécessitant une intervention cyber, notre boucle AIOps (détection Isolation Forest + remédiation Ansible) rétablit le service en moins de 25 secondes, respectant largement notre engagement contractuel."*
 
 #### [2:30 - 3:00] — Conclusion
 > *"En conclusion, PROJECT RESILIENCE-ALPHA prouve qu'une plateforme financière conteneurisée moderne peut survivre à des attaques de saturation et de corruption grâce à l'alliance de l'hygiène DevSecOps, du durcissement WAF et de l'intelligence artificielle AIOps."*
@@ -232,6 +239,12 @@ python3 scripts/red_attack.py --mode chrono
 
 ### 💡 Réponses aux Questions Pièges Potentielles du Jury
 
+* **Question du Jury :** *"Votre blocage WAF se fait-il réellement sans interruption de service ?"*
+  * **Réponse :** *"En toute transparence d'ingénierie : dans le prototype actuel, l'injection de la règle de blocage par Ansible entraîne un redémarrage/rechargement du conteneur WAF, ce qui induit une micro-coupure de 2 à 3 secondes. C'est une dette technique identifiée et assumée dans notre rapport de gouvernance EBIOS RM ; pour la production, l'objectif est d'utiliser un pur rechargement à chaud `nginx -s reload` sans perte de session TCP."*
+* **Question du Jury :** *"La clé d'idempotence garantit-elle à 100% l'absence de doublons pour tous les utilisateurs ?"*
+  * **Réponse :** *"Elle le garantit de façon absolue pour tous les clients qui la renseignent grâce à la contrainte d'unicité PostgreSQL. Néanmoins, dans l'état actuel de notre API, le champ est facultatif (`nullable=True`). Un marchand qui omettrait la clé ne bénéficierait pas du dédoublonnage automatique. La rendre strictement obligatoire à la validation Pydantic fait partie de nos chantiers d'amélioration post-workshop."*
+* **Question du Jury :** *"Le RTO de 1,8 s que vous mentionnez vient-il de votre IA de remédiation ?"*
+  * **Réponse :** *"Non, il ne faut pas confondre les deux couches de résilience : les 1,8 s mesurent la reprise locale d'un conteneur par l'orchestrateur Docker daemon (`restart: unless-stopped`) suite à un crash de processus. La boucle complète de remédiation AIOps (analyse non supervisée par Isolation Forest sur 2 fenêtres glissantes + exécution du playbook Ansible + validation du paiement de preuve) opère quant à elle en moins de 25 secondes, ce qui reste très inférieur à notre engagement BIA de 2 minutes."*
 * **Question du Jury :** *"Pourquoi avoir choisi SOPS plutôt qu'un gestionnaire comme HashiCorp Vault ?"*
   * **Réponse :** *"Le cahier des charges laissait le choix. Vault apporte une complexité opérationnelle majeure pour un prototype conteneurisé : il consomme 1 Go de RAM supplémentaire et nécessite une procédure de descellement en cas de redémarrage. SOPS + age garantit le même niveau cryptographique (courbe X25519), stocke les secrets scellés directement dans le référentiel Git, et permet un redémarrage autonome immédiat sans aucune intervention humaine."*
 * **Question du Jury :** *"Si Docker Desktop masque l'IP réelle de l'attaquant en 10.77.10.1, comment protégez-vous le service ?"*
