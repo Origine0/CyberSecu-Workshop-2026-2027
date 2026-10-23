@@ -39,6 +39,7 @@ import {
   HealthCheckResponse 
 } from '../types/index.ts';
 import * as api from '../utils/api.ts';
+import { generateContextualRagAnswer } from '../utils/ragKnowledge.ts';
 
 export interface RobotDisplayViewProps {
   isDegraded?: boolean;
@@ -98,6 +99,7 @@ export const RobotDisplayView: React.FC<RobotDisplayViewProps> = ({
   // Modal / Dialogue vocal RAG
   const [showVoiceModal, setShowVoiceModal] = useState<boolean>(false);
   const [ragLoading, setRagLoading] = useState<boolean>(false);
+  const [customQuery, setCustomQuery] = useState<string>('');
 
   // --- Métriques Télémétriques Réelles & ML ---
   const [requestRate, setRequestRate] = useState<number>(0.50);
@@ -360,11 +362,11 @@ export const RobotDisplayView: React.FC<RobotDisplayViewProps> = ({
 
     try {
       const res = await api.askRag(queryText);
-      const answer = res.response || "Aucune consigne documentée trouvée.";
+      const answer = res.response || generateContextualRagAnswer(queryText, { wafStatus, transactions, mlResult, health });
       addLog('rag', 'RAG IA', 'bg-violet-500/20 text-violet-300 border-violet-500/50', answer);
       speakRag(answer);
     } catch {
-      const fallback = "Selon les procédures de PROJECT RESILIENCE-ALPHA : en cas d'attaque avérée, isoler immédiatement la source via le playbook Ansible Zero-Touch. L'IA reste strictement consultative.";
+      const fallback = generateContextualRagAnswer(queryText, { wafStatus, transactions, mlResult, health });
       addLog('rag', 'RAG IA', 'bg-violet-500/20 text-violet-300 border-violet-500/50', fallback);
       speakRag(fallback);
     } finally {
@@ -766,47 +768,99 @@ export const RobotDisplayView: React.FC<RobotDisplayViewProps> = ({
               </p>
             )}
 
+            {/* Champ de saisie tactile / texte direct */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (customQuery.trim()) {
+                  handleAskRagQuestion(customQuery.trim());
+                  setCustomQuery('');
+                }
+              }}
+              className="w-full flex items-center gap-1.5 mt-0.5"
+            >
+              <input
+                type="text"
+                value={customQuery}
+                onChange={(e) => setCustomQuery(e.target.value)}
+                placeholder="Posez votre question ou sélectionnez une suggestion..."
+                className="flex-1 bg-zinc-900/90 border border-zinc-700/80 rounded-xl px-3 py-1.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500"
+              />
+              <button
+                type="submit"
+                disabled={!customQuery.trim() || ragLoading}
+                className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white font-mono text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors shrink-0"
+              >
+                <Send className="w-3 h-3" />
+                <span>Poser</span>
+              </button>
+            </form>
+
             {/* Questions rapides prêtes à l'emploi (1 clic pour le jury) */}
-            <div className="w-full flex flex-col gap-1.5 mt-1">
-              <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider text-left">
-                Questions rapides (Système, Architecture & Attaques subies) :
+            <div className="w-full flex flex-col gap-1 mt-1">
+              <span className="text-[9.5px] font-mono text-zinc-400 uppercase tracking-wider text-left font-bold">
+                Suggestions prêtes (Système, WAF, DORA, Architecture & Attaques) :
               </span>
-              <div className="flex flex-wrap gap-1.5 justify-center max-h-24 overflow-y-auto pr-1">
+              <div className="flex flex-wrap gap-1.5 justify-start max-h-28 overflow-y-auto pr-1">
                 <button
                   onClick={() => handleAskRagQuestion("Quels sont les scénarios d'attaque testés sur la plateforme ?")}
-                  className="text-[10px] font-medium bg-zinc-900/80 hover:bg-indigo-950/60 border border-zinc-800 hover:border-indigo-500/40 text-zinc-300 px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer"
+                  className="text-[9.5px] font-medium bg-zinc-900/90 hover:bg-indigo-950/80 border border-zinc-800 hover:border-indigo-500/50 text-zinc-200 px-2 py-1 rounded-lg text-left transition-colors cursor-pointer"
                 >
-                  🎯 Scénarios d'attaque Red Team (SC-01 à SC-04)
+                  🎯 Scénarios Red Team (SC-01 à SC-04)
                 </button>
                 <button
                   onClick={() => handleAskRagQuestion("Combien de requêtes ou attaques ont été bloquées par le WAF ?")}
-                  className="text-[10px] font-medium bg-zinc-900/80 hover:bg-indigo-950/60 border border-zinc-800 hover:border-indigo-500/40 text-zinc-300 px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer"
+                  className="text-[9.5px] font-medium bg-zinc-900/90 hover:bg-indigo-950/80 border border-zinc-800 hover:border-indigo-500/50 text-zinc-200 px-2 py-1 rounded-lg text-left transition-colors cursor-pointer"
                 >
-                  🛡️ Attaques & flux bloqués par le WAF
+                  🛡️ Flux & IPs bloqués par le WAF
                 </button>
                 <button
                   onClick={() => handleAskRagQuestion("Quels conteneurs et microservices composent l'architecture ?")}
-                  className="text-[10px] font-medium bg-zinc-900/80 hover:bg-indigo-950/60 border border-zinc-800 hover:border-indigo-500/40 text-zinc-300 px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer"
+                  className="text-[9.5px] font-medium bg-zinc-900/90 hover:bg-indigo-950/80 border border-zinc-800 hover:border-indigo-500/50 text-zinc-200 px-2 py-1 rounded-lg text-left transition-colors cursor-pointer"
                 >
-                  🏗️ Microservices de l'architecture
+                  🏗️ 17 Conteneurs & 5 Réseaux
                 </button>
                 <button
                   onClick={() => handleAskRagQuestion("Quel est le plan d'adressage IP du labo et des conteneurs ?")}
-                  className="text-[10px] font-medium bg-zinc-900/80 hover:bg-indigo-950/60 border border-zinc-800 hover:border-indigo-500/40 text-zinc-300 px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer"
+                  className="text-[9.5px] font-medium bg-zinc-900/90 hover:bg-indigo-950/80 border border-zinc-800 hover:border-indigo-500/50 text-zinc-200 px-2 py-1 rounded-lg text-left transition-colors cursor-pointer"
                 >
                   🌐 Plan d'adressage Wi-Fi & Docker
                 </button>
                 <button
                   onClick={() => handleAskRagQuestion("Pourquoi avoir choisi SOPS et age plutôt que HashiCorp Vault ?")}
-                  className="text-[10px] font-medium bg-zinc-900/80 hover:bg-indigo-950/60 border border-zinc-800 hover:border-indigo-500/40 text-zinc-300 px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer"
+                  className="text-[9.5px] font-medium bg-zinc-900/90 hover:bg-indigo-950/80 border border-zinc-800 hover:border-indigo-500/50 text-zinc-200 px-2 py-1 rounded-lg text-left transition-colors cursor-pointer"
                 >
                   🔑 Secrets : SOPS+age vs Vault
                 </button>
                 <button
                   onClick={() => handleAskRagQuestion("Que faire en cas d'attaque par déni de service ?")}
-                  className="text-[10px] font-medium bg-zinc-900/80 hover:bg-indigo-950/60 border border-zinc-800 hover:border-indigo-500/40 text-zinc-300 px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer"
+                  className="text-[9.5px] font-medium bg-zinc-900/90 hover:bg-indigo-950/80 border border-zinc-800 hover:border-indigo-500/50 text-zinc-200 px-2 py-1 rounded-lg text-left transition-colors cursor-pointer"
                 >
-                  ⚡ Procédure en cas de DoS
+                  ⚡ Procédure en cas de DoS (Zero-Touch)
+                </button>
+                <button
+                  onClick={() => handleAskRagQuestion("Quels sont les objectifs RTO et RPO du projet ?")}
+                  className="text-[9.5px] font-medium bg-zinc-900/90 hover:bg-indigo-950/80 border border-zinc-800 hover:border-indigo-500/50 text-zinc-200 px-2 py-1 rounded-lg text-left transition-colors cursor-pointer"
+                >
+                  ⏱️ RTO cible 2 min & RPO = 0
+                </button>
+                <button
+                  onClick={() => handleAskRagQuestion("Comment fonctionne la détection d'anomalies par Machine Learning ?")}
+                  className="text-[9.5px] font-medium bg-zinc-900/90 hover:bg-indigo-950/80 border border-zinc-800 hover:border-indigo-500/50 text-zinc-200 px-2 py-1 rounded-lg text-left transition-colors cursor-pointer"
+                >
+                  🧠 Détection Isolation Forest
+                </button>
+                <button
+                  onClick={() => handleAskRagQuestion("Quel est le rôle du robot Firewall-ie ?")}
+                  className="text-[9.5px] font-medium bg-zinc-900/90 hover:bg-indigo-950/80 border border-zinc-800 hover:border-indigo-500/50 text-zinc-200 px-2 py-1 rounded-lg text-left transition-colors cursor-pointer"
+                >
+                  🤖 Rôle du Robot Sentinelle
+                </button>
+                <button
+                  onClick={() => handleAskRagQuestion("En quoi la plateforme est-elle conforme à la directive DORA ?")}
+                  className="text-[9.5px] font-medium bg-zinc-900/90 hover:bg-indigo-950/80 border border-zinc-800 hover:border-indigo-500/50 text-zinc-200 px-2 py-1 rounded-lg text-left transition-colors cursor-pointer"
+                >
+                  📜 Conformité DORA & EBIOS RM
                 </button>
               </div>
             </div>

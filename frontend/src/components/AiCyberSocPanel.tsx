@@ -26,6 +26,7 @@ import { AiAnalyzeResponse, AiAskResponse, Transaction, WafStatusResponse } from
 import { AiPulseOrb, OrbState } from './AiPulseOrb.tsx';
 import { useVoiceAssistant } from '../hooks/useVoiceAssistant.ts';
 import { soundFx } from '../utils/audioAlerts.ts';
+import { generateContextualRagAnswer } from '../utils/ragKnowledge.ts';
 import { useVoiceRecognition } from '../hooks/useVoiceRecognition.ts';
 
 interface AiCyberSocPanelProps {
@@ -353,27 +354,29 @@ export const AiCyberSocPanel: React.FC<AiCyberSocPanelProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: q }),
-        signal: AbortSignal.timeout(15000)
+        signal: AbortSignal.timeout(10000)
       });
       if (res.ok) {
         const data: AiAskResponse = await res.json();
-        setRagResponse(data);
+        const answer = data.response || generateContextualRagAnswer(q, { wafStatus, transactions, mlResult });
+        setRagResponse({ ...data, response: answer });
         setIsAiOnline(true);
-        addVoiceLog('rag', `Réponse RAG : ${data.response.substring(0, 80)}...`);
+        addVoiceLog('rag', `Réponse RAG : ${answer.substring(0, 80)}...`);
         if (autoRead) {
-          speakRag(data.response);
+          speakRag(answer);
         }
       } else {
         throw new Error('Erreur RAG');
       }
     } catch {
-      const fallbackResponse = `Selon les procédures de PROJECT RESILIENCE-ALPHA : en cas d'attaque avérée, appliquer immédiatement les procédures de confinement Zero-Touch. Le modèle d'intelligence artificielle est strictement consultatif et sans droits de remédiation technique.`;
+      const fallbackResponse = generateContextualRagAnswer(q, { wafStatus, transactions, mlResult });
       setRagResponse({
         query: q,
         response: fallbackResponse,
         status: "FALLBACK_OFFLINE",
         advisory_role: "READ_ONLY_NO_REMEDIATION"
       });
+      addVoiceLog('rag', `Réponse RAG : ${fallbackResponse.substring(0, 80)}...`);
       if (autoRead) {
         speakRag(fallbackResponse);
       }
